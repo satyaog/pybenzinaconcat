@@ -1,4 +1,5 @@
-import argparse, glob, importlib.util, logging, os, subprocess, sys
+import argparse, ctypes, glob, importlib.util, logging, os, subprocess, sys, \
+    tarfile
 
 LOGGER = logging.getLogger(os.path.basename(__file__))
 LOGGER.setLevel(logging.INFO)
@@ -10,7 +11,8 @@ STREAM_HANDLER.setFormatter(FORMATTER)
 LOGGER.addHandler(STREAM_HANDLER)
 
 h5py_spec = importlib.util.find_spec("h5py")
-if h5py_spec is not None:
+is_h5py_accessible = h5py_spec is not None
+if is_h5py_accessible:
     import h5py
     import numpy as np
 
@@ -228,6 +230,102 @@ def transcode(args):
 
 def extract_hdf5(args):
     """ Takes a source HDF5 file and extracts images from it into a destination
+    directory
+
+    :param args: parsed arguments
+    """
+    tmp_dir = args.tmp
+    extract_dir = tmp_dir if tmp_dir is not None else args.dest
+
+    extracted_filenames = []
+
+    with h5py.File(args.src, "r") as file_h5:
+        num_elements = len(file_h5["encoded_images"])
+
+        start = args.start
+        end = min(args.start + args.number, num_elements) \
+              if args.number else num_elements
+
+        if tmp_dir and not os.path.exists(tmp_dir):
+            os.makedirs(tmp_dir)
+        if extract_dir and not os.path.exists(extract_dir):
+            os.makedirs(extract_dir)
+
+        for i in range(start, end):
+            filename = file_h5["filenames"][i][0].decode("utf-8")
+            filename = _make_index_filepath(filename, i)
+            extract_filepath = os.path.join(extract_dir, filename)
+            target_filepath = _make_target_filepath(extract_filepath)
+
+            extracted_filenames.append(extract_filepath)
+
+            if not os.path.exists(extract_filepath):
+                img = bytes(file_h5["encoded_images"][i])
+
+                with open(extract_filepath, "xb") as file:
+                    file.write(img)
+
+            if not os.path.exists(target_filepath):
+                target = file_h5["targets"][i].astype(np.int64).tobytes()
+
+                with open(target_filepath, "xb") as file:
+                    file.write(target)
+
+    return extracted_filenames
+
+
+def extract_tar(args):
+    """ Takes a source tar file and extracts images from it into a destination
+    directory
+
+    :param args: parsed arguments
+    """
+    tmp_dir = args.tmp
+    extract_dir = tmp_dir if tmp_dir is not None else args.dest
+
+    extracted_filenames = []
+
+    index = 0
+    start = args.start
+    end = args.start + args.number if args.number else \
+                                   ctypes.c_ulonglong(-1).value
+
+    with tarfile.open(args.src, "r") as file_tar:
+        for target_idx, member in enumerate(file_tar):
+            if index >= end:
+                break
+            sub_tar = file_tar.extractfile(member)
+            file_sub_tar = tarfile.open(fileobj=sub_tar, mode="r")
+            for sub_member in file_sub_tar:
+                if index >= end:
+                    break
+
+                if index >= start:
+                    filename = sub_member.name
+                    filename = _make_index_filepath(filename, index)
+                    extract_filepath = os.path.join(extract_dir, filename)
+                    target_filepath = _make_target_filepath(extract_filepath)
+
+                    extracted_filenames.append(extract_filepath)
+
+                    if not os.path.exists(extract_filepath):
+                        file_sub_tar.extract(sub_member, extract_dir)
+                        os.rename(os.path.join(extract_dir, sub_member.name),
+                                  extract_filepath)
+
+                    if not os.path.exists(target_filepath):
+                        target = target_idx.to_bytes(8, byteorder="little")
+
+                        with open(target_filepath, "xb") as file:
+                            file.write(target)
+
+                index += 1
+
+    return extracted_filenames
+
+
+def extract_archive(args):
+    """ Takes a source archive file and extracts images from it into a destination
     directory. If the --transcode parameter is set, images will also be
     transcoded
 
@@ -237,41 +335,10 @@ def extract_hdf5(args):
         args.ssh_remote = None
         args.tmp = None
 
-    tmp_dir = args.tmp if args.tmp is not None else None
-    extract_dir = tmp_dir if tmp_dir is not None else args.dest
-
-    file_h5 = h5py.File(args.src, "r")
-    num_elements = len(file_h5["encoded_images"])
-
-    start = args.start
-    end = min(start + args.number, num_elements) if args.number else num_elements
-
-    if tmp_dir and not os.path.exists(tmp_dir):
-        os.makedirs(tmp_dir)
-    if extract_dir and not os.path.exists(extract_dir):
-        os.makedirs(extract_dir)
-
-    extracted_filenames = []
-
-    for i in range(start, end):
-        filename = file_h5["filenames"][i][0].decode("utf-8")
-        filename = _make_index_filepath(filename, i)
-        extract_filepath = os.path.join(extract_dir, filename)
-        target_filepath = _make_target_filepath(extract_filepath)
-
-        extracted_filenames.append(extract_filepath)
-
-        if not os.path.exists(extract_filepath):
-            img_jpeg = bytes(file_h5["encoded_images"][i])
-
-            with open(extract_filepath, "xb") as file:
-                file.write(img_jpeg)
-
-        if not os.path.exists(target_filepath):
-            target = file_h5["targets"][i].astype(np.int64).tobytes()
-
-            with open(target_filepath, "xb") as file:
-                file.write(target)
+    if args.type == "hdf5":
+        extracted_filenames = extract_hdf5(args)
+    else:
+        extracted_filenames = extract_tar(args)
 
     if args.transcode:
         transcode_args = build_transcode_parser() \
@@ -279,7 +346,7 @@ def extract_hdf5(args):
                          ','.join(extracted_filenames),
                          args.dest,
                          "--ssh-remote", args.ssh_remote,
-                         "--tmp", tmp_dir])
+                         "--tmp", args.tmp])
 
         transcode(transcode_args)
 
@@ -330,39 +397,37 @@ def build_transcode_parser():
     return parser
 
 
-def build_extract_hdf5_parser():
+def build_extract_archive_parser():
     parser = argparse.ArgumentParser(description="Benzina HEIF Concatenation action: "
-                                                 "\"extract_hdf5\"",
+                                                 "\"extract_archive\"",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    if extract_hdf5:
-        parser.add_argument("action", metavar="\"extract_hdf5\"",
-                            help="action to execute")
-        parser.add_argument("src", metavar="source",
-                            help="the hdf5 file to draw the images to extract and "
-                                 "transcode if --transcode is True")
-        parser.add_argument("dest", metavar="destination",
-                            help="the destination directory of extracted "
-                                 "file(s) or transcoded file(s) if --transcode "
-                                 "is True")
-        parser.add_argument("--start", default=0, type=int,
-                            help="the start element index to transcode from source")
-        parser.add_argument("--number", default=1000, metavar="NUM", type=int,
-                            help="the number of elements to extract from source")
+    parser.add_argument("action", metavar="\"extract_archive\"",
+                        help="action to execute")
+    parser.add_argument("type", choices=["hdf5", "tar"] if is_h5py_accessible else
+                                        ["tar"],
+                        help="type of the archive")
+    parser.add_argument("src", metavar="source",
+                        help="the archive file to draw the images to extract and "
+                             "transcode, if --transcode is True")
+    parser.add_argument("dest", metavar="destination",
+                        help="the destination directory of extracted "
+                             "file(s) or transcoded file(s) if --transcode "
+                             "is True")
+    parser.add_argument("--start", default=0, type=int,
+                        help="the start element index to transcode from source")
+    parser.add_argument("--number", default=1000, metavar="NUM", type=int,
+                        help="the number of elements to extract from source")
 
-        parser.add_argument("--transcode", default=False, action="store_true",
-                            help="follow the extraction with a transcoding")
-        parser.add_argument("--ssh-remote", metavar="REMOTE",
-                            help="if --transcode is True, optional remote to "
-                                 "use to transfer the transcoded file to "
-                                 "destination")
-        parser.add_argument("--tmp", metavar="DIR",
-                            help="if --transcode is True, the directory to "
-                                 "store temporary file(s)")
-
-    else:
-        parser.add_argument("action", choices="\"extract_hdf5\"",
-                            help="Unavailable action as h5py is not accessible")
+    parser.add_argument("--transcode", default=False, action="store_true",
+                        help="follow the extraction with a transcoding")
+    parser.add_argument("--ssh-remote", metavar="REMOTE",
+                        help="if --transcode is True, optional remote to "
+                             "use to transfer the transcoded file to "
+                             "destination")
+    parser.add_argument("--tmp", metavar="DIR",
+                        help="if --transcode is True, the directory to "
+                             "store temporary file(s)")
 
     return parser
 
@@ -386,10 +451,10 @@ def main(args):
     ACTIONS.get(args.action, None)(args)
 
 
-ACTIONS = {"transcode": transcode, "concat": concat, "extract_hdf5": extract_hdf5}
+ACTIONS = {"transcode": transcode, "concat": concat, "extract_archive": extract_archive}
 ACTIONS_PARSER = {"concat": build_concat_parser(),
                   "transcode": build_transcode_parser(),
-                  "extract_hdf5": build_extract_hdf5_parser(),
+                  "extract_archive": build_extract_archive_parser(),
                   "_": build_base_parser()}
 
 
