@@ -1,5 +1,6 @@
-import argparse, ctypes, glob, importlib.util, logging, os, subprocess, sys, \
-    tarfile
+import argparse, copy, ctypes, glob, importlib.util, logging, os, subprocess, \
+    sys, tarfile
+from multiprocessing import Pool
 
 LOGGER = logging.getLogger(os.path.basename(__file__))
 LOGGER.setLevel(logging.INFO)
@@ -166,19 +167,27 @@ def transcode_img(input_path, dest_dir, args):
         os.makedirs(tmp_dir)
 
     output_path = _make_transcoded_filepath(os.path.join(tmp_dir, filename))
-    command = "image2heif --codec=h265 --tile=512:512:yuv420 --crf=10 " \
-              "--output={dest} " \
-              "--primary --thumb --name={name} " \
-              "--item=path={src}" \
-              .format(name=os.path.basename(input_path),
-                      src=input_path, dest=output_path)
+    command = "image2heif"
+    cmd_arguments = " --codec=h265 --tile=512:512:yuv420 --crf=10 " \
+                    "--output={dest} " \
+                    "--primary --thumb --name={name} " \
+                    "--item=path={src}" \
+                    .format(name=os.path.basename(input_path),
+                            src=input_path, dest=output_path)
     if os.path.exists(target_path):
-        command += " --hidden --name=target " \
-                   "--mime=application/octet-stream --item=type=mime,path={target}" \
-                   .format(target=target_path)
+        cmd_arguments += " --hidden --name=target " \
+                         "--mime=application/octet-stream " \
+                         "--item=type=mime,path={target}" \
+                         .format(target=target_path)
 
-    process = subprocess.Popen(command.split())
+    process = subprocess.Popen([command] +
+                               ["--" + arg for arg in cmd_arguments.split(" --")[1:]])
     process.wait()
+
+    if process.wait() != 0:
+        LOGGER.error("Could transcode file [{}] with target [{}] to [{}]"
+                     .format(input_path, target_path, output_path))
+        return
 
     uploaded_path = os.path.join(upload_dir, os.path.basename(output_path))
     process = subprocess.Popen(["rsync", "-v", "--remove-source-files", output_path,
@@ -324,13 +333,17 @@ def extract_tar(args):
     return extracted_filenames
 
 
-def extract_archive(args):
+def single_process_extract_archive(args):
     """ Takes a source archive file and extracts images from it into a destination
     directory. If the --transcode parameter is set, images will also be
     transcoded
 
+    args.jobs is ignored in this function
+
     :param args: parsed arguments
     """
+    args.jobs = None
+
     if not args.transcode:
         args.ssh_remote = None
         args.tmp = None
@@ -349,6 +362,53 @@ def extract_archive(args):
                          "--tmp", args.tmp])
 
         transcode(transcode_args)
+
+
+def extract_archive(args):
+    """ Takes a source archive file and extracts images from it into a destination
+    directory. If the --transcode parameter is set, images will also be
+    transcoded
+
+    This will split the process to use all cores available
+
+    :param args: parsed arguments
+    """
+    if not args.transcode:
+        args.ssh_remote = None
+        args.tmp = None
+
+    if args.jobs == 0:
+        args.jobs = os.cpu_count()
+
+    if args.number:
+        processes_args = []
+        split_number = args.number / args.jobs
+        start = args.start
+        next_start = 0
+        for process_i in range(args.jobs):
+            next_start = start + split_number
+
+            process_args = copy.deepcopy(args)
+            process_args.jobs = None
+            process_args.start = int(round(start))
+            process_args.number = args.start + args.number - process_args.start \
+                                  if process_i == args.jobs - 1 \
+                                  else int(round(next_start)) - int(round(start))
+            processes_args.append(process_args)
+
+            start = next_start
+    else:
+        processes_args = [args]
+
+    # Minimize async issues when trying to create the same directory multiple
+    # times and at the same time
+    tmp_dir = args.tmp
+    extract_dir = tmp_dir if tmp_dir is not None else args.dest
+    if extract_dir and not os.path.exists(extract_dir):
+        os.makedirs(extract_dir)
+
+    with Pool(args.jobs) as pool:
+        pool.map(single_process_extract_archive, processes_args)
 
 
 def build_base_parser():
@@ -418,6 +478,10 @@ def build_extract_archive_parser():
                         help="the start element index to transcode from source")
     parser.add_argument("--number", default=1000, metavar="NUM", type=int,
                         help="the number of elements to extract from source")
+    parser.add_argument("--jobs", default=0, metavar="NUM", type=int,
+                        help="the number of workers to work in parallel. Use '0' "
+                             "to use as much workers as possible. Note that number "
+                             "needs to be specified")
 
     parser.add_argument("--transcode", default=False, action="store_true",
                         help="follow the extraction with a transcoding")

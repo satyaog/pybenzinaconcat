@@ -348,7 +348,6 @@ def test_trancode_target_data_completed_3():
 def test_extract_tar():
     src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
     dest = "output/dir/extract/"
-    src_dir = os.path.dirname(src)
     dest_dir = os.path.dirname(dest)
 
     args = parse_args(["extract_archive", "tar", src, dest])
@@ -607,7 +606,6 @@ def test_extract_tar():
 def test_extract_tar_start_number():
     src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
     dest = "output/dir/extract/"
-    src_dir = os.path.dirname(src)
     dest_dir = os.path.dirname(dest)
 
     args = parse_args(["extract_archive", "tar", src, dest,
@@ -658,7 +656,6 @@ def test_extract_tar_start_number_transcode():
     src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
     dest = "output/dir/"
     tmp = "tmp/dir/"
-    src_dir = os.path.dirname(src)
     dest_dir = os.path.dirname(dest)
     tmp_dir = os.path.dirname(tmp)
     upload_dir = os.path.join(dest_dir, "upload")
@@ -770,6 +767,7 @@ def test_action_redirection():
                                   "dest_extract_hdf5",
                                   "--start", "10",
                                   "--number", "15",
+                                  "--jobs", "2",
                                   "--transcode",
                                   "--ssh-remote", "remote_extract_hdf5",
                                   "--tmp", "tmp_extract_hdf5"]
@@ -780,6 +778,7 @@ def test_action_redirection():
                                  "dest_extract_tar",
                                  "--start", "10",
                                  "--number", "15",
+                                 "--jobs", "2",
                                  "--transcode",
                                  "--ssh-remote", "remote_extract_tar",
                                  "--tmp", "tmp_extract_tar"]
@@ -806,6 +805,7 @@ def test_action_redirection():
     assert args.dest == "dest_extract_hdf5"
     assert args.start == 10
     assert args.number == 15
+    assert args.jobs == 2
     assert args.ssh_remote == "remote_extract_hdf5"
     assert args.tmp == "tmp_extract_hdf5"
 
@@ -817,5 +817,6 @@ def test_action_redirection():
     assert args.dest == "dest_extract_tar"
     assert args.start == 10
     assert args.number == 15
+    assert args.jobs == 2
     assert args.ssh_remote == "remote_extract_tar"
     assert args.tmp == "tmp_extract_tar"
