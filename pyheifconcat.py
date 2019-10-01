@@ -384,7 +384,6 @@ def extract_archive(args):
         processes_args = []
         split_number = args.number / args.jobs
         start = args.start
-        next_start = 0
         for process_i in range(args.jobs):
             next_start = start + split_number
 
