@@ -127,19 +127,6 @@ def clap_traks(traks, width, height, thumb_width, thumb_height):
             avc1.append(pasp)
 
 
-def reset_traks_id(moov):
-    traks = [box for box in moov.boxes if box.header.type == b"trak"]
-    track_id = 1
-
-    for i, trak in enumerate(traks):
-        # moov.trak.tkhd
-        trak.boxes[0].track_id = (track_id,)
-        track_id += 1
-
-    # moov.mvhd
-    moov.boxes[0].next_track_id = (track_id,)
-
-
 def insert_filenames_trak(traks, mdat, mdat_start_pos, filenames):
     creation_time = to_mp4_time(datetime.utcnow())
     modification_time = creation_time
@@ -169,7 +156,7 @@ def insert_filenames_trak(traks, mdat, mdat_start_pos, filenames):
 
     # MOOV.TRAK.MDIA.MINF.STBL.STSD.METT
     mett = filename_trak.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0]
-    mett.mime_format = (b'text/plain\0',)
+    mett.mime_format = (b"text/plain\0",)
 
     traks[:] = traks[0:1] + [filename_trak] + traks[1:]
 
@@ -203,9 +190,22 @@ def insert_targets_trak(traks, mdat, mdat_start_pos, targets):
 
     # MOOV.TRAK.MDIA.MINF.STBL.STSD.METT
     mett = target_trak.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0]
-    mett.mime_format = (b'text/plain\0',)
+    mett.mime_format = (b"text/plain\0",)
 
     traks[:] = traks[0:1] + [target_trak] + traks[1:]
+
+
+def reset_traks_id(moov):
+    traks = [box for box in moov.boxes if box.header.type == b"trak"]
+    track_id = 1
+
+    for i, trak in enumerate(traks):
+        # moov.trak.tkhd
+        trak.boxes[0].track_id = (track_id,)
+        track_id += 1
+
+    # moov.mvhd
+    moov.boxes[0].next_track_id = (track_id,)
 
 
 def i2m_frame_pad_filter(width, height, tile_width, tile_height):
@@ -220,9 +220,7 @@ def i2m_frame_pad_filter(width, height, tile_width, tile_height):
                    border_bottom=pad_height - height)
 
 
-def i2m_frame_scale_and_pad(src, dest, target, tile_width, tile_height):
-    with Image.open(src) as src_file:
-        src_width, src_height = src_file.size
+def i2m_frame_scale_and_pad(src, dest, src_width, src_height, tile_width, tile_height):
     width_factor = tile_width / src_width if src_width > tile_width else 1
     height_factor = tile_height / src_height if src_height > tile_height else 1
     factor = min(width_factor, height_factor)
@@ -256,6 +254,18 @@ def i2m_frame_scale_and_pad(src, dest, target, tile_width, tile_height):
                                 "-i", src, # "-i", srt,
                                 "-filter_complex", ffmpeg_filter] + map + [dest])
     process.wait()
+
+
+def image2mp4(src, dest, target, tile_width, tile_height):
+    with Image.open(src) as src_file:
+        src_width, src_height = src_file.size
+    width_factor = tile_width / src_width if src_width > tile_width else 1
+    height_factor = tile_height / src_height if src_height > tile_height else 1
+    factor = min(width_factor, height_factor)
+    thumb_width = int(src_width * factor)
+    thumb_height = int(src_height * factor)
+
+    i2m_frame_scale_and_pad(src, dest, src_width, src_height, tile_width, tile_height)
 
     boxes = parse_and_load_boxes(dest)
     clean_boxes(boxes)
