@@ -24,8 +24,8 @@ def _clean_boxes(boxes):
     moov.boxes.pop()
 
     # moov.mvhd
-    moov.boxes[0].timescale = (20,)
-    moov.boxes[0].duration = (20,)
+    moov.boxes[0].timescale = 20
+    moov.boxes[0].duration = 20
 
     traks = [box for box in moov.boxes if box.header.type == b"trak"]
 
@@ -46,13 +46,13 @@ def _clean_boxes(boxes):
             # "\x00\x00\x02" trak is used in the presentation
             # "\x00\x00\x04" trak is used in the preview
             # "\x00\x00\x08" trak size in not in pixel but in aspect ratio
-            tkhd.header.flags = (b"\x00\x00\x00" if i == 0 else b"\x00\x00\x03",)
+            tkhd.header.flags = b"\x00\x00\x00" if i == 0 else b"\x00\x00\x03"
 
-            hdlr.name = (b"bzna_input" if i == 0 else b"bzna_thumb",)
+            hdlr.name = b"bzna_input" if i == 0 else b"bzna_thumb"
 
-    ftyp.major_brand = (1769172845,)  # b"isom"
-    ftyp.minor_version = (0,)
-    ftyp.compatible_brands = ([1769172845],)  # b"isom"
+    ftyp.major_brand = 1769172845           # b"isom"
+    ftyp.minor_version = 0
+    ftyp.compatible_brands = [1769172845]   # b"isom"
     ftyp.refresh_box_size()
 
     chunk_offset_diff = ftyp.header.box_size - mdat.header.start_pos
@@ -64,7 +64,7 @@ def _clean_boxes(boxes):
         # moov.trak.mdia.minf.stbl.stco
         stco = stbl.boxes[-1]
         for entry in stco.entries:
-            entry.chunk_offset = (entry.chunk_offset + chunk_offset_diff,)
+            entry.chunk_offset = entry.chunk_offset + chunk_offset_diff
 
 
 def clap_traks(traks, width, height, thumb_width, thumb_height):
@@ -79,8 +79,8 @@ def clap_traks(traks, width, height, thumb_width, thumb_height):
             clap_width = width if i == 0 else thumb_width
             clap_height = height if i == 0 else thumb_height
 
-            tkhd.width = ([clap_width, 0],)
-            tkhd.height = ([clap_height, 0],)
+            tkhd.width = [clap_width, 0]
+            tkhd.height = [clap_height, 0]
 
             # moov.trak.mdia.minf.stbl.stsd.avc1
             avc1 = trak.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0]
@@ -88,14 +88,14 @@ def clap_traks(traks, width, height, thumb_width, thumb_height):
             # moov.trak.mdia.minf.stbl.stsd.avc1.clap
             clap = bx_def.CLAP(BoxHeader())
             clap.header.type = b"clap"
-            clap.clean_aperture_width_n = (clap_width,)
-            clap.clean_aperture_width_d = (1,)
-            clap.clean_aperture_height_n = (clap_height,)
-            clap.clean_aperture_height_d = (1,)
-            clap.horiz_off_n = (clap_width - avc1.width,)
-            clap.horiz_off_d = (2,)
-            clap.vert_off_n = (clap_height - avc1.height,)
-            clap.vert_off_d = (2,)
+            clap.clean_aperture_width_n = clap_width
+            clap.clean_aperture_width_d = 1
+            clap.clean_aperture_height_n = clap_height
+            clap.clean_aperture_height_d = 1
+            clap.horiz_off_n = clap_width - avc1.width
+            clap.horiz_off_d = 2
+            clap.vert_off_n = clap_height - avc1.height
+            clap.vert_off_d = 2
 
             # insert 'clap' before 'pasp'
             pasp = avc1.pop()
@@ -110,7 +110,7 @@ def insert_filenames_trak(traks, mdat, mdat_start_pos, filenames):
     chunk_offset = mdat_start_pos + mdat.header.box_size
     sizes = [len(filename) for filename in filenames]
 
-    mdat.data = (mdat.data + b''.join(filenames),)
+    mdat.data = mdat.data + b''.join(filenames)
     mdat.header.box_size = mdat.header.box_size + sum(sizes)
 
     filename_trak = make_meta_trak(creation_time, modification_time,
@@ -124,14 +124,14 @@ def insert_filenames_trak(traks, mdat, mdat_start_pos, filenames):
     # "\x00\x00\x02" trak is used in the presentation
     # "\x00\x00\x04" trak is used in the preview
     # "\x00\x00\x08" trak size in not in pixel but in aspect ratio
-    tkhd.header.flags = (b"\x00\x00\x03",)
+    tkhd.header.flags = b"\x00\x00\x03"
 
-    tkhd.width = ([0, 0],)
-    tkhd.height = ([0, 0],)
+    tkhd.width = [0, 0]
+    tkhd.height = [0, 0]
 
     # MOOV.TRAK.MDIA.MINF.STBL.STSD.METT
     mett = filename_trak.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0]
-    mett.mime_format = (b"text/plain\0",)
+    mett.mime_format = b"text/plain\0"
 
     traks[:] = traks[0:1] + [filename_trak] + traks[1:]
 
@@ -143,7 +143,7 @@ def insert_targets_trak(traks, mdat, mdat_start_pos, mime, targets):
     chunk_offset = mdat_start_pos + mdat.header.box_size
     sizes = [8] * len(targets)
 
-    mdat.data = (mdat.data + b''.join(targets),)
+    mdat.data = mdat.data + b''.join(targets)
     mdat.header.box_size = mdat.header.box_size + sum(sizes)
 
     target_trak = make_meta_trak(creation_time, modification_time,
@@ -157,14 +157,14 @@ def insert_targets_trak(traks, mdat, mdat_start_pos, mime, targets):
     # "\x00\x00\x02" trak is used in the presentation
     # "\x00\x00\x04" trak is used in the preview
     # "\x00\x00\x08" trak size in not in pixel but in aspect ratio
-    tkhd.header.flags = (b"\x00\x00\x00",)
+    tkhd.header.flags = b"\x00\x00\x00"
 
-    tkhd.width = ([0, 0],)
-    tkhd.height = ([0, 0],)
+    tkhd.width = [0, 0]
+    tkhd.height = [0, 0]
 
     # MOOV.TRAK.MDIA.MINF.STBL.STSD.METT
     mett = target_trak.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0]
-    mett.mime_format = (bytes(mime, "utf8") + b"\0",)
+    mett.mime_format = bytes(mime, "utf8") + b"\0"
 
     traks[:] = traks[0:1] + [target_trak] + traks[1:]
 
@@ -175,11 +175,11 @@ def reset_traks_id(moov):
 
     for i, trak in enumerate(traks):
         # moov.trak.tkhd
-        trak.boxes[0].track_id = (track_id,)
+        trak.boxes[0].track_id = track_id
         track_id += 1
 
     # moov.mvhd
-    moov.boxes[0].next_track_id = (track_id,)
+    moov.boxes[0].next_track_id = track_id
 
 
 def i2m_frame_pad_filter(width, height, tile):
@@ -245,11 +245,11 @@ def i2m_frame_scale_and_pad(src, dest, src_width, src_height, tile, make_thumb):
         mvhd = moov.boxes[0]
 
         # moov.trak.tkhd
-        trak_thumb.boxes[0].track_id = (mvhd.next_track_id,)
+        trak_thumb.boxes[0].track_id = mvhd.next_track_id
 
         moov.append(trak_thumb)
 
-        mvhd.next_track_id = (mvhd.next_track_id + 1,)
+        mvhd.next_track_id = mvhd.next_track_id + 1
 
         traks.append(trak_thumb)
 
