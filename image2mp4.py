@@ -1,4 +1,7 @@
+import argparse
+import os
 import subprocess
+import sys
 from datetime import datetime
 
 from bitstring import ConstBitStream
@@ -9,15 +12,7 @@ from pybzparse.headers import BoxHeader
 from pybzparse.utils import make_meta_trak, to_mp4_time
 
 
-def parse_and_load_boxes(filepath):
-    bstr = ConstBitStream(filename=filepath)
-    boxes = [box for box in Parser.parse(bstr)]
-    for box in boxes:
-        box.load(bstr)
-    return boxes
-
-
-def clean_boxes(boxes):
+def _clean_boxes(boxes):
     # remove 'free' box
     boxes[:] = boxes[:1] + boxes[2:]
 
@@ -33,25 +28,6 @@ def clean_boxes(boxes):
     moov.boxes[0].duration = (20,)
 
     traks = [box for box in moov.boxes if box.header.type == b"trak"]
-
-    # append thumb trak
-    if len(traks) == 1:
-        trak_input = traks[0]
-        trak_bstr = ConstBitStream(bytes(trak_input))
-        trak_thumb = next(Parser.parse(trak_bstr))
-        trak_thumb.load(trak_bstr)
-
-        # moov.mvhd
-        mvhd = moov.boxes[0]
-
-        # moov.trak.tkhd
-        trak_thumb.boxes[0].track_id = (mvhd.next_track_id,)
-
-        moov.append(trak_thumb)
-
-        mvhd.next_track_id = (mvhd.next_track_id + 1,)
-
-        traks.append(trak_thumb)
 
     for i, trak in enumerate(traks):
         # remove 'edts' box
@@ -132,7 +108,6 @@ def insert_filenames_trak(traks, mdat, mdat_start_pos, filenames):
     modification_time = creation_time
 
     chunk_offset = mdat_start_pos + mdat.header.box_size
-    filenames = [bytes(filename, "utf8") for filename in filenames]
     sizes = [len(filename) for filename in filenames]
 
     mdat.data = (mdat.data + b''.join(filenames),)
@@ -161,12 +136,11 @@ def insert_filenames_trak(traks, mdat, mdat_start_pos, filenames):
     traks[:] = traks[0:1] + [filename_trak] + traks[1:]
 
 
-def insert_targets_trak(traks, mdat, mdat_start_pos, targets):
+def insert_targets_trak(traks, mdat, mdat_start_pos, mime, targets):
     creation_time = to_mp4_time(datetime.now())
     modification_time = creation_time
 
     chunk_offset = mdat_start_pos + mdat.header.box_size
-    targets = [target.to_bytes(8, byteorder="little") for target in targets]
     sizes = [8] * len(targets)
 
     mdat.data = (mdat.data + b''.join(targets),)
@@ -190,7 +164,7 @@ def insert_targets_trak(traks, mdat, mdat_start_pos, targets):
 
     # MOOV.TRAK.MDIA.MINF.STBL.STSD.METT
     mett = target_trak.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0]
-    mett.mime_format = (b"text/plain\0",)
+    mett.mime_format = (bytes(mime, "utf8") + b"\0",)
 
     traks[:] = traks[0:1] + [target_trak] + traks[1:]
 
@@ -208,67 +182,96 @@ def reset_traks_id(moov):
     moov.boxes[0].next_track_id = (track_id,)
 
 
-def i2m_frame_pad_filter(width, height, tile_width, tile_height):
-    pad_width = int((width + tile_width - 1) / tile_width) * tile_width
-    pad_height = int((height + tile_height - 1) / tile_height) * tile_height
+def i2m_frame_pad_filter(width, height, tile):
+    pad_width = int((width + tile.width - 1) / tile.width) * tile.width
+    pad_height = int((height + tile.height - 1) / tile.height) * tile.height
 
     return "pad={pad_width}:{pad_height}:0:0," \
            "fillborders=0:{border_right}:0:{border_bottom}:smear," \
-           "format=pix_fmts=yuv420p" \
+           "format=pix_fmts={pixel_fmt}" \
            .format(pad_width=pad_width, pad_height=pad_height,
                    border_right=pad_width - width,
-                   border_bottom=pad_height - height)
+                   border_bottom=pad_height - height,
+                   pixel_fmt=tile.pixel_fmt)
 
 
-def i2m_frame_scale_and_pad(src, dest, src_width, src_height, tile_width, tile_height):
-    width_factor = tile_width / src_width if src_width > tile_width else 1
-    height_factor = tile_height / src_height if src_height > tile_height else 1
+def i2m_frame_scale_and_pad(src, dest, src_width, src_height, tile, make_thumb):
+    width_factor = tile.width / src_width if src_width > tile.width else 1
+    height_factor = tile.height / src_height if src_height > tile.height else 1
     factor = min(width_factor, height_factor)
     thumb_width = int(src_width * factor)
     thumb_height = int(src_height * factor)
-
-    # srt = filepath2srt(src)
 
     # Input filter
     ffmpeg_filter = ["[0:0]",
-                     i2m_frame_pad_filter(src_width, src_height,
-                                          tile_width, tile_height),
+                     i2m_frame_pad_filter(src_width, src_height, tile),
                      "[i]"]
-    map = ["-map", "[i]"]
+    mapping = ["-map", "[i]"]
 
     # Thumbnail filter
-    if factor != 1:
+    if make_thumb and factor != 1:
         ffmpeg_filter += [";[0:0]scale=w={width}:h={height},"
                           .format(width=thumb_width, height=thumb_height),
-                          i2m_frame_pad_filter(thumb_width, thumb_height,
-                                               tile_width, tile_height),
+                          i2m_frame_pad_filter(thumb_width, thumb_height, tile),
                           "[t]"]
-        map += ["-map", "[t]"]
-
-    # # Subtitle track
-    # map += ["-map", "1", "-c:s", "mov_text"]
+        mapping += ["-map", "[t]"]
 
     ffmpeg_filter = "".join(ffmpeg_filter)
 
-    process = subprocess.Popen(["ffmpeg", "-y", "-framerate", "1",
-                                "-i", src, # "-i", srt,
-                                "-filter_complex", ffmpeg_filter] + map + [dest])
-    process.wait()
+    subprocess.run(["ffmpeg", "-y", "-framerate", "1", "-i", src,
+                    "-filter_complex", ffmpeg_filter] + mapping + [dest],
+                   check=True)
+
+    bstr = ConstBitStream(filename=dest)
+    boxes = [box for box in Parser.parse(bstr)]
+    for box in boxes:
+        box.load(bstr)
+    del bstr
+    os.remove(dest)
+
+    # moov
+    moov = boxes[-1]
+    # moov.traks
+    traks = [box for box in moov.boxes if box.header.type == b"trak"]
+
+    # append thumbnail trak
+    if make_thumb and len(traks) == 1:
+        trak_input = traks[0]
+        trak_bstr = ConstBitStream(bytes(trak_input))
+        trak_thumb = next(Parser.parse(trak_bstr))
+        trak_thumb.load(trak_bstr)
+
+        # moov.mvhd
+        mvhd = moov.boxes[0]
+
+        # moov.trak.tkhd
+        trak_thumb.boxes[0].track_id = (mvhd.next_track_id,)
+
+        moov.append(trak_thumb)
+
+        mvhd.next_track_id = (mvhd.next_track_id + 1,)
+
+        traks.append(trak_thumb)
+
+    return boxes
 
 
-def image2mp4(src, dest, target, tile_width, tile_height):
-    with Image.open(src) as src_file:
+def image2mp4(args):
+    src_item, target_item = args.items
+    tile = args.tile
+
+    with Image.open(src_item.item.path) as src_file:
         src_width, src_height = src_file.size
-    width_factor = tile_width / src_width if src_width > tile_width else 1
-    height_factor = tile_height / src_height if src_height > tile_height else 1
+    width_factor = tile.width / src_width if src_width > tile.width else 1
+    height_factor = tile.height / src_height if src_height > tile.height else 1
     factor = min(width_factor, height_factor)
     thumb_width = int(src_width * factor)
     thumb_height = int(src_height * factor)
 
-    i2m_frame_scale_and_pad(src, dest, src_width, src_height, tile_width, tile_height)
+    boxes = i2m_frame_scale_and_pad(src_item.item.path, args.output,
+                                    src_width, src_height, tile, src_item.thumb)
 
-    boxes = parse_and_load_boxes(dest)
-    clean_boxes(boxes)
+    _clean_boxes(boxes)
 
     ftyp, mdat, moov = boxes
     ftyp.refresh_box_size()
@@ -278,8 +281,11 @@ def image2mp4(src, dest, target, tile_width, tile_height):
     for i in range(len(traks)):
         moov.pop()
 
-    insert_filenames_trak(traks, mdat, ftyp.header.box_size, [src])
-    insert_targets_trak(traks, mdat, ftyp.header.box_size, [target])
+    insert_filenames_trak(traks, mdat, ftyp.header.box_size,
+                          [bytes(src_item.name, "utf8")])
+    with open(target_item.item.path, "rb") as target_file:
+        insert_targets_trak(traks, mdat, ftyp.header.box_size, target_item.mime,
+                            [target_file.read()])
     clap_traks(traks, src_width, src_height, thumb_width, thumb_height)
 
     for trak in traks:
@@ -291,5 +297,94 @@ def image2mp4(src, dest, target, tile_width, tile_height):
         box.refresh_box_size()
         mp4_bytes_buffer.append(bytes(box))
 
-    with open(dest, "wb") as output:
+    with open(args.output, "wb") as output:
         output.write(b''.join(mp4_bytes_buffer))
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(description="Benzina Image2MP4",
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--codec", default="h265", choices=["h264", "h265"],
+                        help="codec to use in the transcoded image")
+    parser.add_argument("--tile", default="512:512:yuv420p",
+                        help="tile configuration (WIDTH:HEIGHT:PIXEL_FORMAT)")
+    parser.add_argument("--crf", default="10", type=int,
+                        help="constant rate factor to use for the transcoded image")
+    parser.add_argument("--output", help="target output filename")
+    parser.add_argument("-_", action='store', dest='items', nargs='*', default=[], help="")
+
+    return parser
+
+
+def build_tile_config_parser():
+    tile_config_parser = argparse.ArgumentParser(description="Benzina Image2MP4 item config parser",
+                                                 formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    tile_config_parser.add_argument("width", type=int, help="The width of the tile")
+    tile_config_parser.add_argument("height", type=int, help="The height of the tile")
+    tile_config_parser.add_argument("pixel_fmt", choices=["yuv420p"],
+                                    help="The pixel format of the tile")
+
+    return tile_config_parser
+
+
+def build_item_parser():
+    item_parser = argparse.ArgumentParser(description="Benzina Image2MP4 item parser",
+                                          formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    item_parser.add_argument("--primary", default=False, action="store_true",
+                             help="identify the primary item")
+    item_parser.add_argument("--hidden", default=False, action="store_true",
+                             help="set hidden bit (incompatible with `--primary`)")
+    item_parser.add_argument("--name", help="name of the item")
+    item_parser.add_argument("--thumb", default=False, action="store_true",
+                             help="create a thumbnail")
+    item_parser.add_argument("--mime", default="application/octet-stream",
+                             help="MIME-type of item (if the item's type is 'mime')")
+    item_parser.add_argument("--item", help="item configuration "
+                                            "([id=INT,][type=TYPE,]path=PATH)")
+
+    return item_parser
+
+
+def build_item_config_parser():
+    item_config_parser = argparse.ArgumentParser(description="Benzina Image2MP4 item config parser",
+                                                 formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    item_config_parser.add_argument("--id", type=int, help="The id of the item")
+    item_config_parser.add_argument("--type", choices=["mime"],
+                                    help="The type of the item")
+    item_config_parser.add_argument("--path", help="The path of the item's source")
+
+    return item_config_parser
+
+
+def parse_args(raw_arguments=None):
+    argv = sys.argv[1:] if raw_arguments is None else raw_arguments
+    parser = build_parser()
+    tile_config_parser = build_tile_config_parser()
+    item_parser = build_item_parser()
+    item_config_parser = build_item_config_parser()
+
+    args, items_argv = parser.parse_known_args(argv)
+
+    tile_config_args = tile_config_parser.parse_args(args.tile.split(":"))
+    args.tile = tile_config_args
+
+    item_argv = []
+
+    for arg in items_argv:
+        item_argv.append(arg)
+        if arg.startswith("--item"):
+            item_args = item_parser.parse_args(item_argv)
+            item_config_argv = item_args.item.split(",")
+            item_config_argv = ["--" + arg for arg in item_config_argv]
+            item_config_args = item_config_parser.parse_args(item_config_argv)
+            if item_config_args.type != "mime":
+                item_args.mime = None
+            item_args.item = item_config_args
+            args.items.append(item_args)
+            item_argv = []
+
+    return args
+
+
+if __name__ == "__main__":
+    image2mp4(parse_args())

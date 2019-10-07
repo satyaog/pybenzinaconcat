@@ -5,9 +5,9 @@ from bitstring import ConstBitStream
 from pybzparse import Parser, boxes as bx_def
 from pybzparse.headers import BoxHeader
 
-from image2mp4 import clap_traks, clean_boxes, \
+from image2mp4 import clap_traks, _clean_boxes, \
                       insert_filenames_trak, insert_targets_trak, \
-                      reset_traks_id
+                      reset_traks_id, parse_args
 
 
 PWD = "tests_tmp"
@@ -18,7 +18,7 @@ if PWD and not os.path.exists(PWD):
 os.chdir(PWD)
 
 
-def test_clean_boxes():
+def test__clean_boxes():
     src = "../test_dataset/transcode_steps/n02100735_8211.mp4"
 
     bstr = ConstBitStream(filename=src)
@@ -26,7 +26,7 @@ def test_clean_boxes():
     for box in boxes:
         box.load(bstr)
 
-    clean_boxes(boxes)
+    _clean_boxes(boxes)
 
     assert len(boxes) == 3
 
@@ -69,57 +69,6 @@ def test_clean_boxes():
     assert stco.entries[0].chunk_offset == 96769
 
 
-def test_clean_boxes_add_missing_thumb():
-    src = "../test_dataset/transcode_steps/n02119789_4903.mp4"
-
-    bstr = ConstBitStream(filename=src)
-    boxes = [box for box in Parser.parse(bstr)]
-    for box in boxes:
-        box.load(bstr)
-
-    clean_boxes(boxes)
-
-    assert len(boxes) == 3
-
-    ftyp = boxes[0]
-    moov = boxes[2]
-
-    ftyp.refresh_box_size()
-    moov.refresh_box_size()
-
-    assert ftyp.major_brand == 1769172845  # b"isom"
-    assert ftyp.header.box_size == 20
-    assert ftyp.minor_version == 0
-    assert ftyp.compatible_brands == [1769172845]  # b"isom"
-
-    assert moov.header.box_size == 1146
-    assert len(moov.boxes) == 3
-
-    traks = [box for box in moov.boxes if box.header.type == b"trak"]
-
-    assert len(traks) == 2
-
-    assert len(traks[0].boxes) == 2
-
-    # moov.trak.tkhd
-    assert traks[0].boxes[0].header.flags == b"\x00\x00\x00"
-    # moov.trak.mdia.hdlr
-    assert traks[0].boxes[1].boxes[1].name == b"bzna_input"
-
-    # moov.trak.mdia.minf.stbl.stco
-    stco = traks[0].boxes[-1].boxes[-1].boxes[-1].boxes[-1]
-    assert stco.entries[0].chunk_offset == 28
-
-    # moov.trak.tkhd
-    assert traks[1].boxes[0].header.flags == b"\x00\x00\x03"
-    # moov.trak.mdia.hdlr
-    assert traks[1].boxes[1].boxes[1].name == b"bzna_thumb"
-
-    # moov.trak.mdia.minf.stbl.stco
-    stco = traks[1].boxes[-1].boxes[-1].boxes[-1].boxes[-1]
-    assert stco.entries[0].chunk_offset == 28
-
-
 def test_clap_traks():
     src = "../test_dataset/transcode_steps/n02100735_8211.mp4"
     width = 600
@@ -132,7 +81,7 @@ def test_clap_traks():
     for box in boxes:
         box.load(bstr)
 
-    clean_boxes(boxes)
+    _clean_boxes(boxes)
 
     moov = boxes[2]
 
@@ -191,7 +140,7 @@ def test_insert_filenames_trak():
     traks = [bx_def.TRAK(BoxHeader()), bx_def.TRAK(BoxHeader()),
              bx_def.TRAK(BoxHeader())]
 
-    insert_filenames_trak(traks, mdat, 20, ["0001/n02100735_8211.JPEG"])
+    insert_filenames_trak(traks, mdat, 20, [b"0001/n02100735_8211.JPEG"])
 
     assert len(traks) == 4
     assert mdat.header.box_size == 42
@@ -233,7 +182,8 @@ def test_insert_targets_trak():
     traks = [bx_def.TRAK(BoxHeader()), bx_def.TRAK(BoxHeader()),
              bx_def.TRAK(BoxHeader())]
 
-    insert_targets_trak(traks, mdat, 20, [100])
+    insert_targets_trak(traks, mdat, 20, "application/octet-stream",
+                        [(100).to_bytes(8, byteorder="little")])
 
     assert len(traks) == 4
     assert mdat.header.box_size == 26
@@ -252,7 +202,7 @@ def test_insert_targets_trak():
 
     # MOOV.TRAK.MDIA.MINF.STBL.STSD.METT
     mett = filename_trak.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0]
-    assert mett.mime_format == b"text/plain\0"
+    assert mett.mime_format == b"application/octet-stream\0"
 
     # MOOV.TRAK.MDIA.MINF.STBL.STSZ
     stsz = filename_trak.boxes[-1].boxes[-1].boxes[-1].boxes[2]
@@ -285,3 +235,41 @@ def test_reset_traks_id():
     for i, trak in enumerate([box for box in moov.boxes
                               if box.header.type == b"trak"]):
         assert trak.boxes[0].track_id == i + 1
+
+
+def test_parse_args():
+    raw_arguments = ["--codec=h265", "--tile=512:512:yuv420p", "--crf=10",
+                     "--output=out.mp4",
+                     "--primary", "--thumb", "--name=n02100735_8211.JPEG",
+                     "--item=path=n02100735_8211.JPEG",
+                     "--hidden", "--name=target", "--mime=application/octet-stream",
+                     "--item=type=mime,path=n02100735_8211.JPEG.target"]
+
+    args = parse_args(raw_arguments)
+
+    assert args.codec == "h265"
+    assert args.tile.width == 512
+    assert args.tile.height == 512
+    assert args.tile.pixel_fmt == "yuv420p"
+    assert args.crf == 10
+    assert args.output == "out.mp4"
+
+    assert len(args.items) == 2
+
+    assert args.items[0].primary is True
+    assert args.items[0].hidden is False
+    assert args.items[0].name == "n02100735_8211.JPEG"
+    assert args.items[0].thumb is True
+    assert args.items[0].mime == "application/octet-stream"
+    assert args.items[0].item.id is None
+    assert args.items[0].item.type is None
+    assert args.items[0].item.path == "n02100735_8211.JPEG"
+
+    assert args.items[1].primary is False
+    assert args.items[1].hidden is True
+    assert args.items[1].name == "target"
+    assert args.items[1].thumb is False
+    assert args.items[1].mime == "application/octet-stream"
+    assert args.items[1].item.id is None
+    assert args.items[1].item.type == "mime"
+    assert args.items[1].item.path == "n02100735_8211.JPEG.target"
