@@ -41,7 +41,7 @@ def test__clean_boxes():
     assert ftyp.minor_version == 0
     assert ftyp.compatible_brands == [1769172845]  # b"isom"
 
-    assert moov.header.box_size == 1150
+    assert moov.header.box_size == 5491
     assert len(moov.boxes) == 3
 
     traks = [box for box in moov.boxes if box.header.type == b"trak"]
@@ -66,7 +66,7 @@ def test__clean_boxes():
 
     # moov.trak.mdia.minf.stbl.stco
     stco = traks[1].boxes[-1].boxes[-1].boxes[-1].boxes[-1]
-    assert stco.entries[0].chunk_offset == 96769
+    assert stco.entries[0].chunk_offset == 221612
 
 
 def test_clap_traks():
@@ -97,7 +97,7 @@ def test_clap_traks():
     assert tkhd.width == 600
     assert tkhd.height == 535
 
-    # moov.trak.mdia.minf.stbl.stsd.avc1.clap
+    # moov.trak.mdia.minf.stbl.stsd.hvc1.clap
     clap = trak_input.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0].boxes[-2]
 
     assert clap.header.type == b"clap"
@@ -116,7 +116,7 @@ def test_clap_traks():
     assert tkhd.width == 512
     assert tkhd.height == 456
 
-    # moov.trak.mdia.minf.stbl.stsd.avc1.clap
+    # moov.trak.mdia.minf.stbl.stsd.hvc1.clap
     clap = trak_thumb.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0].boxes[-2]
 
     assert clap.header.type == b"clap"
@@ -238,7 +238,7 @@ def test_reset_traks_id():
 
 
 def test_parse_args():
-    raw_arguments = ["--codec=h265", "--tile=512:512:yuv420p", "--crf=10",
+    raw_arguments = ["--codec=h265", "--tile=512:512:yuv420", "--crf=10",
                      "--output=out.mp4",
                      "--primary", "--thumb", "--name=n02100735_8211.JPEG",
                      "--item=path=n02100735_8211.JPEG",
@@ -250,7 +250,7 @@ def test_parse_args():
     assert args.codec == "h265"
     assert args.tile.width == 512
     assert args.tile.height == 512
-    assert args.tile.pixel_fmt == "yuv420p"
+    assert args.tile.pixel_fmt == "yuv420"
     assert args.crf == 10
     assert args.output == "out.mp4"
 
@@ -260,7 +260,7 @@ def test_parse_args():
     assert args.items[0].hidden is False
     assert args.items[0].name == "n02100735_8211.JPEG"
     assert args.items[0].thumb is True
-    assert args.items[0].mime == "application/octet-stream"
+    assert args.items[0].mime is None
     assert args.items[0].item.id is None
     assert args.items[0].item.type is None
     assert args.items[0].item.path == "n02100735_8211.JPEG"

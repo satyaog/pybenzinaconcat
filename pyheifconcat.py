@@ -358,9 +358,9 @@ def single_process_extract_archive(args):
             .parse_args(["transcode",
                          ','.join(extracted_filenames),
                          args.dest,
-                         ("--mp4" if args.mp4 else ""),
                          "--ssh-remote", args.ssh_remote,
-                         "--tmp", args.tmp])
+                         "--tmp", args.tmp] +
+                        (["--mp4"] if args.mp4 else []))
 
         transcode(transcode_args)
 
