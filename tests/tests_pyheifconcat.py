@@ -6,7 +6,7 @@ from pyheifconcat import FILENAME_TEMPLATE, _get_file_index, \
     concat, extract_archive, transcode, parse_args
 
 TESTS_WORKING_DIR = os.path.abspath('.')
-DATA_DIR = os.path.abspath("./test_dataset")
+DATA_DIR = os.path.abspath("./test_datasets")
 
 os.environ["PATH"] = ':'.join([os.environ["PATH"],
                                os.path.join(TESTS_WORKING_DIR, "mocks")])

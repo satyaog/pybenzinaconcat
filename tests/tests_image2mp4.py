@@ -19,7 +19,7 @@ os.chdir(PWD)
 
 
 def test__clean_boxes():
-    src = "../test_dataset/transcode_steps/n02100735_8211.mp4"
+    src = "../test_datasets/transcode_steps/n02100735_8211.mp4"
 
     bstr = ConstBitStream(filename=src)
     boxes = [box for box in Parser.parse(bstr)]
@@ -70,7 +70,7 @@ def test__clean_boxes():
 
 
 def test_clap_traks():
-    src = "../test_dataset/transcode_steps/n02100735_8211.mp4"
+    src = "../test_datasets/transcode_steps/n02100735_8211.mp4"
     width = 600
     height = 535
     thumb_width = 512
