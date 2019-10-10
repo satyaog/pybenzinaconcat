@@ -2,14 +2,13 @@ import argparse
 import os
 import subprocess
 import sys
-from datetime import datetime
 
 from bitstring import ConstBitStream
 from PIL import Image
 
 from pybzparse import Parser, boxes as bx_def
 from pybzparse.headers import BoxHeader
-from pybzparse.utils import make_meta_trak, to_mp4_time
+from pybzparse.utils import make_meta_trak
 
 CODECS_DICT = {"h264": "libx264", "h265": "libx265"}
 PIXEL_FMTS_DICT = {"yuv420": "yuv420p"}
@@ -108,7 +107,7 @@ def clap_traks(traks, width, height, thumb_width, thumb_height):
 
 
 def insert_filenames_trak(traks, mdat, mdat_start_pos, filenames):
-    creation_time = to_mp4_time(datetime.utcnow())
+    creation_time = 0
     modification_time = creation_time
 
     chunk_offset = mdat_start_pos + mdat.header.box_size
@@ -141,7 +140,7 @@ def insert_filenames_trak(traks, mdat, mdat_start_pos, filenames):
 
 
 def insert_targets_trak(traks, mdat, mdat_start_pos, mime, targets):
-    creation_time = to_mp4_time(datetime.now())
+    creation_time = 0
     modification_time = creation_time
 
     chunk_offset = mdat_start_pos + mdat.header.box_size
