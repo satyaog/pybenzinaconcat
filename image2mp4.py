@@ -203,10 +203,12 @@ def i2m_frame_scale_and_pad(src, dest, src_width, src_height, codec, crf,
     factor = min(width_factor, height_factor)
     thumb_width = int(src_width * factor)
     thumb_height = int(src_height * factor)
+    make_thumb = make_thumb and factor != 1
 
     # Input filter
-    ffmpeg_filter = ["[0:0]",
-                     i2m_frame_pad_filter(src_width, src_height, tile.width, tile.height),
+    ffmpeg_filter = ["[0:0]format=pix_fmts=yuvj444p[i]",
+                     "[i]" +
+                     i2m_frame_pad_filter(src_width, src_height, tile.width, tile.height) +
                      "[i]"]
     mapping = ["-map", "[i]"]
     codec_settings = ["-c:v", CODECS_DICT[codec], "-tag:v", "hvc1",
@@ -214,15 +216,16 @@ def i2m_frame_scale_and_pad(src, dest, src_width, src_height, codec, crf,
                       "-crf", str(crf)]
 
     # Thumbnail filter
-    if make_thumb and factor != 1:
-        ffmpeg_filter += [";[0:0]scale=w={width}:h={height},"
-                          .format(width=thumb_width, height=thumb_height),
-                          i2m_frame_pad_filter(thumb_width, thumb_height,
-                                               tile.width, tile.height),
-                          "[t]"]
+    if make_thumb:
+        ffmpeg_filter.insert(1, "[i]split[i][t]")
+        ffmpeg_filter.append("[t]scale=w={width}:h={height},"
+                             .format(width=thumb_width, height=thumb_height) +
+                             i2m_frame_pad_filter(thumb_width, thumb_height,
+                                                  tile.width, tile.height) +
+                             "[t]")
         mapping += ["-map", "[t]"]
 
-    ffmpeg_filter = "".join(ffmpeg_filter)
+    ffmpeg_filter = ";".join(ffmpeg_filter)
 
     subprocess.run(["ffmpeg", "-y", "-framerate", "1", "-i", src,
                     "-filter_complex", ffmpeg_filter] +
@@ -242,7 +245,7 @@ def i2m_frame_scale_and_pad(src, dest, src_width, src_height, codec, crf,
     traks = [box for box in moov.boxes if box.header.type == b"trak"]
 
     # append thumbnail trak
-    if make_thumb and len(traks) == 1:
+    if not make_thumb:
         trak_input = traks[0]
         trak_bstr = ConstBitStream(bytes(trak_input))
         trak_thumb = next(Parser.parse(trak_bstr))
