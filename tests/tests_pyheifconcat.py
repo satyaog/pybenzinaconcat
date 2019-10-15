@@ -1,6 +1,6 @@
 import glob, os, shutil, subprocess
 
-from pyheifconcat import FILENAME_TEMPLATE, _get_file_index, \
+from pyheifconcat.pyheifconcat import FILENAME_TEMPLATE, _get_file_index, \
     _get_clean_filepath, _is_transcoded, \
     _make_index_filepath, _make_transcoded_filepath, \
     concat, extract_archive, transcode, parse_args

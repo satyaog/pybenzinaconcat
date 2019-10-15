@@ -5,9 +5,9 @@ from bitstring import ConstBitStream
 from pybzparse import Parser, boxes as bx_def
 from pybzparse.headers import BoxHeader
 
-from image2mp4 import clap_traks, _clean_boxes, \
-                      insert_filenames_trak, insert_targets_trak, \
-                      reset_traks_id, parse_args
+from pyheifconcat.image2mp4 import clap_traks, _clean_boxes, \
+    insert_filenames_trak, insert_targets_trak, \
+    reset_traks_id, parse_args
 
 
 PWD = "tests_tmp"
