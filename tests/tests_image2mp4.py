@@ -245,6 +245,12 @@ def test_parse_args():
                      "--hidden", "--name=target", "--mime=application/octet-stream",
                      "--item=type=mime,path=n02100735_8211.JPEG.target"]
 
+    raw_arguments_no_target = \
+        ["--codec=h265", "--tile=512:512:yuv420", "--crf=10",
+         "--output=out.mp4",
+         "--primary", "--thumb", "--name=n02100735_8211.JPEG",
+         "--item=path=n02100735_8211.JPEG"]
+
     args = parse_args(raw_arguments)
 
     assert args.codec == "h265"
@@ -273,3 +279,23 @@ def test_parse_args():
     assert args.items[1].item.id is None
     assert args.items[1].item.type == "mime"
     assert args.items[1].item.path == "n02100735_8211.JPEG.target"
+
+    args = parse_args(raw_arguments_no_target)
+
+    assert args.codec == "h265"
+    assert args.tile.width == 512
+    assert args.tile.height == 512
+    assert args.tile.pixel_fmt == "yuv420"
+    assert args.crf == 10
+    assert args.output == "out.mp4"
+
+    assert len(args.items) == 1
+
+    assert args.items[0].primary is True
+    assert args.items[0].hidden is False
+    assert args.items[0].name == "n02100735_8211.JPEG"
+    assert args.items[0].thumb is True
+    assert args.items[0].mime is None
+    assert args.items[0].item.id is None
+    assert args.items[0].item.type is None
+    assert args.items[0].item.path == "n02100735_8211.JPEG"

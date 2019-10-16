@@ -167,7 +167,7 @@ def transcode_img(input_path, dest_dir, args):
         os.makedirs(tmp_dir)
 
     output_path = _make_transcoded_filepath(os.path.join(tmp_dir, filename))
-    command = ["python", "image2mp4"] if args.mp4 else ["image2heif"]
+    command = ["python", "image2mp4.py"] if args.mp4 else ["image2heif"]
     cmd_arguments = " --codec=h265 --tile=512:512:yuv420 --crf=10 " \
                     "--output={dest} " \
                     "--primary --thumb --name={name} " \
@@ -179,13 +179,15 @@ def transcode_img(input_path, dest_dir, args):
                          "--mime=application/octet-stream " \
                          "--item=type=mime,path={target}" \
                          .format(target=target_path)
+    else:
+        target_path = None
 
     process = subprocess.Popen(command +
                                ["--" + arg for arg in cmd_arguments.split(" --")[1:]])
     process.wait()
 
     if process.wait() != 0:
-        LOGGER.error("Could transcode file [{}] with target [{}] to [{}]"
+        LOGGER.error("Could not transcode file [{}] with target [{}] to [{}]"
                      .format(input_path, target_path, output_path))
         return
 
@@ -250,6 +252,7 @@ def extract_hdf5(args):
 
     with h5py.File(args.src, "r") as file_h5:
         num_elements = len(file_h5["encoded_images"])
+        num_targets = len(file_h5["targets"])
 
         start = args.start
         end = min(args.start + args.number, num_elements) \
@@ -274,7 +277,7 @@ def extract_hdf5(args):
                 with open(extract_filepath, "xb") as file:
                     file.write(img)
 
-            if not os.path.exists(target_filepath):
+            if not os.path.exists(target_filepath) and i < num_targets:
                 target = file_h5["targets"][i].astype(np.int64).tobytes()
 
                 with open(target_filepath, "xb") as file:
@@ -515,7 +518,7 @@ def parse_args(raw_arguments=None):
     return ACTIONS_PARSER.get(base_args.action, None).parse_args(argv)
 
 
-def main(args):
+def pyheifconcat(args):
     ACTIONS.get(args.action, None)(args)
 
 
@@ -527,4 +530,4 @@ ACTIONS_PARSER = {"concat": build_concat_parser(),
 
 
 if __name__ == "__main__":
-    main(parse_args())
+    pyheifconcat(parse_args())

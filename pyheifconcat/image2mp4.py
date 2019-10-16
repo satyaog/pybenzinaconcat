@@ -10,7 +10,8 @@ from pybzparse import Parser, boxes as bx_def
 from pybzparse.headers import BoxHeader
 from pybzparse.utils import make_meta_trak
 
-CODECS_DICT = {"h264": "libx264", "h265": "libx265"}
+CODECS_DICT = {"h264": ["-c:v", "libx264"],
+               "h265": ["-c:v", "libx265", "-tag:v", "hvc1"]}
 PIXEL_FMTS_DICT = {"yuv420": "yuv420p"}
 TYPES_LIST = ["mime"]
 
@@ -85,25 +86,25 @@ def clap_traks(traks, width, height, thumb_width, thumb_height):
             tkhd.width = [clap_width, 0]
             tkhd.height = [clap_height, 0]
 
-            # moov.trak.mdia.minf.stbl.stsd.hvc1
-            hvc1 = trak.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0]
+            # moov.trak.mdia.minf.stbl.stsd._vc1
+            _vc1 = trak.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0]
 
-            # moov.trak.mdia.minf.stbl.stsd.hvc1.clap
+            # moov.trak.mdia.minf.stbl.stsd._vc1.clap
             clap = bx_def.CLAP(BoxHeader())
             clap.header.type = b"clap"
             clap.clean_aperture_width_n = clap_width
             clap.clean_aperture_width_d = 1
             clap.clean_aperture_height_n = clap_height
             clap.clean_aperture_height_d = 1
-            clap.horiz_off_n = clap_width - hvc1.width
+            clap.horiz_off_n = clap_width - _vc1.width
             clap.horiz_off_d = 2
-            clap.vert_off_n = clap_height - hvc1.height
+            clap.vert_off_n = clap_height - _vc1.height
             clap.vert_off_d = 2
 
             # insert 'clap' before 'pasp'
-            pasp = hvc1.pop()
-            hvc1.append(clap)
-            hvc1.append(pasp)
+            pasp = _vc1.pop()
+            _vc1.append(clap)
+            _vc1.append(pasp)
 
 
 def insert_filenames_trak(traks, mdat, mdat_start_pos, filenames):
@@ -211,8 +212,8 @@ def i2m_frame_scale_and_pad(src, dest, src_width, src_height, codec, crf,
                      i2m_frame_pad_filter(src_width, src_height, tile.width, tile.height) +
                      "[i]"]
     mapping = ["-map", "[i]"]
-    codec_settings = ["-c:v", CODECS_DICT[codec], "-tag:v", "hvc1",
-                      "-pix_fmt", PIXEL_FMTS_DICT[tile.pixel_fmt],
+    codec_settings = CODECS_DICT[codec] + \
+                     ["-pix_fmt", PIXEL_FMTS_DICT[tile.pixel_fmt],
                       "-crf", str(crf)]
 
     # Thumbnail filter
@@ -229,7 +230,7 @@ def i2m_frame_scale_and_pad(src, dest, src_width, src_height, codec, crf,
 
     subprocess.run(["ffmpeg", "-y", "-framerate", "1", "-i", src,
                     "-filter_complex", ffmpeg_filter] +
-                   mapping + codec_settings + [dest],
+                   mapping + codec_settings + ["-f", "mp4", dest],
                    check=True)
 
     bstr = ConstBitStream(filename=dest)
@@ -268,7 +269,8 @@ def i2m_frame_scale_and_pad(src, dest, src_width, src_height, codec, crf,
 
 
 def image2mp4(args):
-    src_item, target_item = args.items
+    src_item, target_item = args.items if len(args.items) == 2 \
+                            else (args.items[0], None)
     tile = args.tile
 
     with Image.open(src_item.item.path) as src_file:
@@ -293,9 +295,10 @@ def image2mp4(args):
     for i in range(len(traks)):
         moov.pop()
 
-    with open(target_item.item.path, "rb") as target_file:
-        insert_targets_trak(traks, mdat, ftyp.header.box_size, target_item.mime,
-                            [target_file.read()])
+    if target_item is not None:
+        with open(target_item.item.path, "rb") as target_file:
+            insert_targets_trak(traks, mdat, ftyp.header.box_size, target_item.mime,
+                                [target_file.read()])
     insert_filenames_trak(traks, mdat, ftyp.header.box_size,
                           [bytes(src_item.name, "utf8")])
     clap_traks(traks, src_width, src_height, thumb_width, thumb_height)
