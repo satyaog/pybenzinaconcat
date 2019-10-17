@@ -399,7 +399,3 @@ def parse_args(raw_arguments=None):
             item_argv = []
 
     return args
-
-
-if __name__ == "__main__":
-    image2mp4(parse_args())

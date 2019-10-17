@@ -167,7 +167,8 @@ def transcode_img(input_path, dest_dir, args):
         os.makedirs(tmp_dir)
 
     output_path = _make_transcoded_filepath(os.path.join(tmp_dir, filename))
-    command = ["python", "image2mp4.py"] if args.mp4 else ["image2heif"]
+    command = ["python", "-m", "pyheifconcat.image2mp4"] \
+              if args.mp4 else ["image2heif"]
     cmd_arguments = " --codec=h265 --tile=512:512:yuv420 --crf=10 " \
                     "--output={dest} " \
                     "--primary --thumb --name={name} " \
@@ -193,8 +194,7 @@ def transcode_img(input_path, dest_dir, args):
 
     uploaded_path = os.path.join(upload_dir, os.path.basename(output_path))
     process = subprocess.Popen(["rsync", "-v", "--remove-source-files", output_path,
-                                _get_remote_path(args.ssh_remote,
-                                                 upload_dir)])
+                                _get_remote_path(args.ssh_remote, upload_dir)])
 
     if process.wait() != 0:
         LOGGER.error("Could not move file [{}] to upload dir [{}]"
@@ -527,7 +527,3 @@ ACTIONS_PARSER = {"concat": build_concat_parser(),
                   "transcode": build_transcode_parser(),
                   "extract_archive": build_extract_archive_parser(),
                   "_": build_base_parser()}
-
-
-if __name__ == "__main__":
-    pyheifconcat(parse_args())

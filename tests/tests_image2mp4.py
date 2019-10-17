@@ -5,7 +5,7 @@ from bitstring import ConstBitStream
 from pybzparse import Parser, boxes as bx_def
 from pybzparse.headers import BoxHeader
 
-from pyheifconcat.image2mp4 import clap_traks, _clean_boxes, \
+from pyheifconcat.image2mp4.image2mp4 import clap_traks, _clean_boxes, \
     insert_filenames_trak, insert_targets_trak, \
     reset_traks_id, parse_args
 
@@ -183,7 +183,7 @@ def test_insert_targets_trak():
              bx_def.TRAK(BoxHeader())]
 
     insert_targets_trak(traks, mdat, 20, "application/octet-stream",
-                        [(100).to_bytes(8, byteorder="little")])
+                        [int.to_bytes(100, 8, byteorder="little")])
 
     assert len(traks) == 4
     assert mdat.header.box_size == 26

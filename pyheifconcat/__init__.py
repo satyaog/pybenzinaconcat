@@ -1,3 +1,3 @@
-from pyheifconcat.pyheifconcat import pyheifconcat, \
+from .pyheifconcat import pyheifconcat, \
     parse_args as cat_parse_args, extract_archive, transcode, concat
-from pyheifconcat.image2mp4 import image2mp4, parse_args as i2m_parse_args
+from .image2mp4 import image2mp4, parse_args as i2m_parse_args
