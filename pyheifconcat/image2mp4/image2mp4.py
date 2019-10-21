@@ -190,11 +190,21 @@ def i2m_frame_pad_filter(width, height, tile_width, tile_height):
     pad_width = int((width + tile_width - 1) / tile_width) * tile_width
     pad_height = int((height + tile_height - 1) / tile_height) * tile_height
 
-    return "pad={pad_width}:{pad_height}:0:0," \
-           "fillborders=0:{border_right}:0:{border_bottom}:smear" \
-           .format(pad_width=pad_width, pad_height=pad_height,
-                   border_right=pad_width - width,
-                   border_bottom=pad_height - height)
+    pad_filter = []
+
+    while pad_width != width or pad_height != height:
+        intermediate_width = min(width * 2, pad_width)
+        intermediate_height = min(height * 2, pad_height)
+        pad_filter.append("pad={pad_width}:{pad_height}:0:0,"
+                          "fillborders=0:{border_right}:0:{border_bottom}:smear"
+                          .format(pad_width=intermediate_width,
+                                  pad_height=intermediate_height,
+                                  border_right=intermediate_width - width,
+                                  border_bottom=intermediate_height - height))
+        width = intermediate_width
+        height = intermediate_height
+
+    return ','.join(pad_filter)
 
 
 def i2m_frame_scale_and_pad(src, dest, src_width, src_height, codec, crf,
