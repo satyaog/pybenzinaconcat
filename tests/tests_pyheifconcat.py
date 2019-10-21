@@ -345,6 +345,56 @@ def test_trancode_target_data_completed_3():
         shutil.rmtree(".", ignore_errors=True)
 
 
+def test_trancode_files_list():
+    dest = "output/dir/"
+    dest_dir = os.path.dirname(dest)
+    tmp_dir = "tmp"
+
+    tmp_filepaths = []
+    for i in range(10):
+        tmp_filepaths.append(os.path.join(tmp_dir, "file_{}_5mb.img".format(i)))
+
+    args = parse_args(["transcode", "list", dest])
+
+    try:
+        with open("list", "w") as files_list:
+            files_list.write('\n'.join(tmp_filepaths[3:]))
+
+        files_bytes = _prepare_transcode_data(tmp_filepaths, 0, tmp_dir, dest_dir)
+        targets_bytes = _prepare_transcode_target_data(tmp_filepaths)
+        transcode(args)
+        _test_trancode(tmp_filepaths, 3, dest_dir, files_bytes, targets_bytes)
+
+    finally:
+        shutil.rmtree(".", ignore_errors=True)
+
+
+def test_trancode_excludes():
+    dest = "output/dir/"
+    dest_dir = os.path.dirname(dest)
+    tmp_dir = "tmp"
+
+    tmp_filepaths = []
+    for i in range(10):
+        tmp_filepaths.append(os.path.join(tmp_dir, "file_{}_5mb.img".format(i)))
+
+    try:
+        with open("list", "w") as files_list:
+            files_list.write('\n'.join(tmp_filepaths))
+        with open("excludes", "w") as excludes:
+            excludes.write('\n'.join(tmp_filepaths[:3]))
+
+        args = parse_args(["transcode", "list", dest, "--excludes=excludes"])
+
+        files_bytes = _prepare_transcode_data(tmp_filepaths, 0, tmp_dir, dest_dir)
+        targets_bytes = _prepare_transcode_target_data(tmp_filepaths)
+        transcode(args)
+        _test_trancode(tmp_filepaths, 3, dest_dir, files_bytes, targets_bytes)
+
+    finally:
+        shutil.rmtree(".", ignore_errors=True)
+
+
 def test_extract_tar():
     src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
     dest = "output/dir/extract/"
@@ -761,6 +811,89 @@ def test_extract_tar_start_number_transcode_mp4():
                 './queue/000000000011.n01443537_1029.JPEG.transcoded',
                 './queue/000000000012.n01443537_1955.JPEG.transcoded',
                 './queue/000000000013.n01443537_962.JPEG.transcoded',
+                './queue/000000000014.n01443537_2563.JPEG.transcoded',
+                './queue/000000000015.n01443537_3344.JPEG.transcoded',
+                './queue/000000000016.n01443537_3601.JPEG.transcoded',
+                './queue/000000000017.n01443537_2333.JPEG.transcoded',
+                './queue/000000000018.n01443537_801.JPEG.transcoded',
+                './queue/000000000019.n01443537_2228.JPEG.transcoded',
+                './queue/000000000020.n01484850_4496.JPEG.transcoded',
+                './queue/000000000021.n01484850_2506.JPEG.transcoded',
+                './queue/000000000022.n01484850_17864.JPEG.transcoded',
+                './queue/000000000023.n01484850_4645.JPEG.transcoded',
+                './queue/000000000024.n01484850_22221.JPEG.transcoded']
+
+        assert len(glob.glob(os.path.join(upload_dir, '*'))) == 0
+
+    finally:
+        shutil.rmtree(".", ignore_errors=True)
+
+
+def test_extract_tar_start_number_transcode_excludes():
+    src = os.path.join(DATA_DIR, "dev_im_net.tar")
+    dest = "./"
+    tmp = "extract/"
+    dest_dir = os.path.dirname(dest)
+    tmp_dir = os.path.dirname(tmp)
+    upload_dir = os.path.join(dest_dir, "upload")
+    queue_dir = os.path.join(dest_dir, "queue")
+    transcode_excludes = ['extract/000000000010.n01443537_2772.JPEG.transcoded',
+                          'extract/000000000011.n01443537_1029.JPEG.transcoded',
+                          'extract/000000000012.n01443537_1955.JPEG.transcoded']
+
+    args = parse_args(["extract_archive", "tar", src, dest,
+                       "--start", "10", "--number", "15",
+                       "--transcode", "--excludes", "excludes",
+                       "--tmp", tmp])
+
+    try:
+        if upload_dir and not os.path.exists(upload_dir):
+            os.makedirs(upload_dir)
+        if queue_dir and not os.path.exists(queue_dir):
+            os.makedirs(queue_dir)
+        with open("excludes", "w") as excludes:
+            excludes.write('\n'.join(transcode_excludes[:3]))
+
+        extract_archive(args)
+
+        extract_list = glob.glob(os.path.join(tmp_dir, '*'))
+        extract_list.sort()
+        assert extract_list == \
+               ['extract/000000000010.n01443537_2772.JPEG',
+                'extract/000000000010.n01443537_2772.JPEG.target',
+                'extract/000000000011.n01443537_1029.JPEG',
+                'extract/000000000011.n01443537_1029.JPEG.target',
+                'extract/000000000012.n01443537_1955.JPEG',
+                'extract/000000000012.n01443537_1955.JPEG.target',
+                'extract/000000000013.n01443537_962.JPEG',
+                'extract/000000000013.n01443537_962.JPEG.target',
+                'extract/000000000014.n01443537_2563.JPEG',
+                'extract/000000000014.n01443537_2563.JPEG.target',
+                'extract/000000000015.n01443537_3344.JPEG',
+                'extract/000000000015.n01443537_3344.JPEG.target',
+                'extract/000000000016.n01443537_3601.JPEG',
+                'extract/000000000016.n01443537_3601.JPEG.target',
+                'extract/000000000017.n01443537_2333.JPEG',
+                'extract/000000000017.n01443537_2333.JPEG.target',
+                'extract/000000000018.n01443537_801.JPEG',
+                'extract/000000000018.n01443537_801.JPEG.target',
+                'extract/000000000019.n01443537_2228.JPEG',
+                'extract/000000000019.n01443537_2228.JPEG.target',
+                'extract/000000000020.n01484850_4496.JPEG',
+                'extract/000000000020.n01484850_4496.JPEG.target',
+                'extract/000000000021.n01484850_2506.JPEG',
+                'extract/000000000021.n01484850_2506.JPEG.target',
+                'extract/000000000022.n01484850_17864.JPEG',
+                'extract/000000000022.n01484850_17864.JPEG.target',
+                'extract/000000000023.n01484850_4645.JPEG',
+                'extract/000000000023.n01484850_4645.JPEG.target',
+                'extract/000000000024.n01484850_22221.JPEG',
+                'extract/000000000024.n01484850_22221.JPEG.target']
+
+        queued_list = glob.glob(os.path.join(queue_dir, '*'))
+        queued_list.sort()
+        assert queued_list == \
+               ['./queue/000000000013.n01443537_962.JPEG.transcoded',
                 './queue/000000000014.n01443537_2563.JPEG.transcoded',
                 './queue/000000000015.n01443537_3344.JPEG.transcoded',
                 './queue/000000000016.n01443537_3601.JPEG.transcoded',

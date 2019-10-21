@@ -230,11 +230,30 @@ def transcode(args):
 
     completed_list = _get_completed_list(dest_dir, args.ssh_remote)
 
-    for input_path in args.src.split(','):
+    if len(args.src.split(',')) == 1 and os.path.basename(args.src) == "list":
+        with open(args.src, 'r') as files_list:
+            source = files_list.read().split('\n')
+    else:
+        source = args.src.split(',')
+
+    if args.excludes:
+        excludes = args.excludes.read().split('\n')
+        args.excludes.close()
+
+        for i, exclude in enumerate(excludes):
+            excludes[i] = _get_clean_filepath(exclude, basename=True)
+    else:
+        excludes = []
+
+    for input_path in source:
         clean_basename = _get_clean_filepath(input_path, basename=True)
         if clean_basename in completed_list:
             LOGGER.info("Ignoring [{}] since [{}] is in [{}]/completed_list"
                         .format(input_path, clean_basename, dest_dir))
+            continue
+        if clean_basename in excludes:
+            LOGGER.info("Ignoring [{}] since [{}] is in [{}]"
+                        .format(input_path, clean_basename, args.excludes.name))
             continue
         transcode_img(input_path, dest_dir, args)
 
@@ -363,7 +382,8 @@ def single_process_extract_archive(args):
                          args.dest,
                          "--ssh-remote", args.ssh_remote,
                          "--tmp", args.tmp] +
-                        (["--mp4"] if args.mp4 else []))
+                        (["--mp4"] if args.mp4 else []) +
+                        (["--excludes", args.excludes] if args.excludes else []))
 
         transcode(transcode_args)
 
@@ -448,9 +468,13 @@ def build_transcode_parser():
     parser.add_argument("action", metavar="\"transcode\"",
                         help="action to execute")
     parser.add_argument("src", metavar="source",
-                        help="the source file or ',' separated files to transcode")
+                        help="the source file or ',' separated files to transcode or "
+                             "a source file named 'list' containing the explicit "
+                             "list of files to transcode")
     parser.add_argument("dest", metavar="destination",
                         help="the destination directory for the transcoded file(s)")
+    parser.add_argument("--excludes", default=None, type=argparse.FileType('r'),
+                        help="a text file containing the list of files to exclude")
     parser.add_argument("--mp4", default=False, action="store_true",
                         help="use image2mp4 instead of image2heif")
     parser.add_argument("--ssh-remote", metavar="REMOTE",
@@ -490,6 +514,9 @@ def build_extract_archive_parser():
 
     parser.add_argument("--transcode", default=False, action="store_true",
                         help="follow the extraction with a transcoding")
+    parser.add_argument("--excludes", default=None,
+                        help="a text file containing the list of files to exclude "
+                             "in the transcoding process")
     parser.add_argument("--mp4", default=False, action="store_true",
                         help="use image2mp4 instead of image2heif")
     parser.add_argument("--ssh-remote", metavar="REMOTE",
