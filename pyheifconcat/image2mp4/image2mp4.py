@@ -12,7 +12,7 @@ from pybzparse.utils import make_meta_trak
 
 CODECS_DICT = {"h264": ["-c:v", "libx264"],
                "h265": ["-c:v", "libx265", "-tag:v", "hvc1"]}
-PIXEL_FMTS_DICT = {"yuv420": "yuv420p"}
+PIXEL_FMTS_DICT = {"yuv420": "yuvj420p"}
 TYPES_LIST = ["mime"]
 
 
@@ -196,7 +196,8 @@ def i2m_frame_pad_filter(width, height, tile_width, tile_height):
         intermediate_width = min(width * 2, pad_width)
         intermediate_height = min(height * 2, pad_height)
         pad_filter.append("pad={pad_width}:{pad_height}:0:0,"
-                          "fillborders=0:{border_right}:0:{border_bottom}:smear"
+                          "fillborders=0:{border_right}:0:{border_bottom}:smear,"
+                          "format=pix_fmts=yuvj444p"
                           .format(pad_width=intermediate_width,
                                   pad_height=intermediate_height,
                                   border_right=intermediate_width - width,
