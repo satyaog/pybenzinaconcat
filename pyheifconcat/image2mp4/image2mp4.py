@@ -196,14 +196,15 @@ def i2m_frame_pad_filter(width, height, tile_width, tile_height):
         intermediate_width = min(width * 2, pad_width)
         intermediate_height = min(height * 2, pad_height)
         pad_filter.append("pad={pad_width}:{pad_height}:0:0,"
-                          "fillborders=0:{border_right}:0:{border_bottom}:smear,"
-                          "format=pix_fmts=yuvj444p"
+                          "fillborders=0:{border_right}:0:{border_bottom}:smear"
                           .format(pad_width=intermediate_width,
                                   pad_height=intermediate_height,
                                   border_right=intermediate_width - width,
                                   border_bottom=intermediate_height - height))
         width = intermediate_width
         height = intermediate_height
+
+    pad_filter.append("format=pix_fmts=yuvj444p")
 
     return ','.join(pad_filter)
 
