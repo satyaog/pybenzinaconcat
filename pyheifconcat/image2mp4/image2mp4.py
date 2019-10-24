@@ -205,6 +205,12 @@ def i2m_frame_pad_filter(width, height, tile_width, tile_height):
         width = intermediate_width
         height = intermediate_height
 
+    # TODO: this is only to prevent too much changes since the last version but
+    #       format=pix_fmts=yuvj444p should be removed from the previous loop
+    #       and appended at the end of the loop
+    if not pad_filter:
+        pad_filter.append("format=pix_fmts=yuvj444p")
+
     return ','.join(pad_filter)
 
 
