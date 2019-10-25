@@ -12,7 +12,9 @@ from pybzparse.utils import make_meta_trak
 
 CODECS_DICT = {"h264": ["-c:v", "libx264"],
                "h265": ["-c:v", "libx265", "-tag:v", "hvc1"]}
-PIXEL_FMTS_DICT = {"yuv420": "yuvj420p"}
+PIXEL_FMTS_DICT = {"yuv420": "yuvj420p",
+                   "yuv420p": "yuvj420p",
+                   "yuvj420p": "yuvj420p"}
 TYPES_LIST = ["mime"]
 
 
@@ -195,7 +197,7 @@ def i2m_frame_pad_filter(width, height, tile_width, tile_height):
     while pad_width != width or pad_height != height:
         intermediate_width = min(width * 2, pad_width)
         intermediate_height = min(height * 2, pad_height)
-        pad_filter.append("pad={pad_width}:{pad_height}:0:0,"
+        pad_filter.append("pad={pad_width}:{pad_height}:0:0,format=pix_fmts=yuvj444p,"
                           "fillborders=0:{border_right}:0:{border_bottom}:smear,"
                           "format=pix_fmts=yuvj444p"
                           .format(pad_width=intermediate_width,
@@ -222,15 +224,18 @@ def i2m_frame_scale_and_pad(src, dest, src_width, src_height, codec, crf,
     thumb_width = int(src_width * factor)
     thumb_height = int(src_height * factor)
     make_thumb = make_thumb and factor != 1
+    pixel_format = PIXEL_FMTS_DICT[tile.pixel_fmt]
 
     # Input filter
     ffmpeg_filter = ["[0:0]format=pix_fmts=yuvj444p[i]",
                      "[i]" +
                      i2m_frame_pad_filter(src_width, src_height, tile.width, tile.height) +
-                     "[i]"]
+                     "[i]",
+                     "[i]format=pix_fmts={pix_fmts}[i]"
+                     .format(pix_fmts=pixel_format)]
     mapping = ["-map", "[i]"]
     codec_settings = CODECS_DICT[codec] + \
-                     ["-pix_fmt", PIXEL_FMTS_DICT[tile.pixel_fmt],
+                     ["-pix_fmt", pixel_format,
                       "-crf", str(crf)]
 
     # Thumbnail filter
@@ -241,6 +246,8 @@ def i2m_frame_scale_and_pad(src, dest, src_width, src_height, codec, crf,
                              i2m_frame_pad_filter(thumb_width, thumb_height,
                                                   tile.width, tile.height) +
                              "[t]")
+        ffmpeg_filter.append("[t]format=pix_fmts={pix_fmts}[t]"
+                             .format(pix_fmts=pixel_format))
         mapping += ["-map", "[t]"]
 
     ffmpeg_filter = ";".join(ffmpeg_filter)
