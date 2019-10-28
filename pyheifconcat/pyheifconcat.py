@@ -161,6 +161,7 @@ def transcode_img(input_path, dest_dir, args):
     tmp_dir = args.tmp if args.tmp is not None else \
               os.path.dirname(input_path)
     filename = os.path.basename(input_path)
+    clean_filename = _get_clean_filepath(input_path, basename=True)
     target_path = _make_target_filepath(input_path)
 
     if tmp_dir and not os.path.exists(tmp_dir):
@@ -173,7 +174,7 @@ def transcode_img(input_path, dest_dir, args):
                     "--output={dest} " \
                     "--primary --thumb --name={name} " \
                     "--item=path={src}" \
-                    .format(name=os.path.basename(input_path),
+                    .format(name=clean_filename,
                             src=input_path, dest=output_path)
     if os.path.exists(target_path):
         cmd_arguments += " --hidden --name=target " \
