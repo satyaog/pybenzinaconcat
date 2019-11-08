@@ -152,6 +152,7 @@ def concat(args):
                 concat_file.write(queued_file.read())
 
             completed_list_file.write(queued_filepath + '\n')
+            completed_list_file.flush()
             os.remove(queued_filepath)
 
 
