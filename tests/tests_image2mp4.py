@@ -1,13 +1,15 @@
 import os
+import shutil
 
 from bitstring import ConstBitStream
 
 from pybzparse import Parser, boxes as bx_def
 from pybzparse.headers import BoxHeader
 
+from pyheifconcat.image2mp4 import image2mp4, parse_args
+
 from pyheifconcat.image2mp4.image2mp4 import clap_traks, _clean_boxes, \
-    make_filenames_trak, make_targets_trak, \
-    reset_traks_id, parse_args
+    make_filenames_trak, make_targets_trak, reset_traks_id
 
 
 PWD = "tests_tmp"
@@ -36,12 +38,12 @@ def test__clean_boxes():
     ftyp.refresh_box_size()
     moov.refresh_box_size()
 
-    assert ftyp.major_brand == 1769172845  # b"isom"
+    assert ftyp.major_brand == 1769172845           # b"isom"
     assert ftyp.header.box_size == 20
     assert ftyp.minor_version == 0
-    assert ftyp.compatible_brands == [1769172845]  # b"isom"
+    assert ftyp.compatible_brands == [1769172845]   # b"isom"
 
-    assert moov.header.box_size == 5491
+    assert moov.header.box_size == 5493
     assert len(moov.boxes) == 3
 
     traks = [box for box in moov.boxes if box.header.type == b"trak"]
@@ -53,7 +55,7 @@ def test__clean_boxes():
     # moov.trak.tkhd
     assert traks[0].boxes[0].header.flags == b"\x00\x00\x00"
     # moov.trak.mdia.hdlr
-    assert traks[0].boxes[1].boxes[1].name == b"bzna_input"
+    assert traks[0].boxes[1].boxes[1].name == b"bzna_input\0"
 
     # moov.trak.mdia.minf.stbl.stco
     stco = traks[0].boxes[-1].boxes[-1].boxes[-1].boxes[-1]
@@ -62,7 +64,7 @@ def test__clean_boxes():
     # moov.trak.tkhd
     assert traks[1].boxes[0].header.flags == b"\x00\x00\x03"
     # moov.trak.mdia.hdlr
-    assert traks[1].boxes[1].boxes[1].name == b"bzna_thumb"
+    assert traks[1].boxes[1].boxes[1].name == b"bzna_thumb\0"
 
     # moov.trak.mdia.minf.stbl.stco
     stco = traks[1].boxes[-1].boxes[-1].boxes[-1].boxes[-1]
@@ -145,7 +147,7 @@ def test_make_filenames_trak():
     assert filename_trak.boxes[0].height == 0
 
     # MOOV.TRAK.MDIA.HDLR
-    assert filename_trak.boxes[1].boxes[1].name == b"bzna_fname"
+    assert filename_trak.boxes[1].boxes[1].name == b"bzna_fname\0"
 
     # MOOV.TRAK.MDIA.MINF.STBL.STSD.METT
     mett = filename_trak.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0]
@@ -178,7 +180,7 @@ def test_make_targets_trak():
     assert target_trak.boxes[0].height == 0
 
     # MOOV.TRAK.MDIA.HDLR
-    assert target_trak.boxes[1].boxes[1].name == b"bzna_target"
+    assert target_trak.boxes[1].boxes[1].name == b"bzna_target\0"
 
     # MOOV.TRAK.MDIA.MINF.STBL.STSD.METT
     mett = target_trak.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0]
@@ -215,6 +217,66 @@ def test_reset_traks_id():
     for i, trak in enumerate([box for box in moov.boxes
                               if box.header.type == b"trak"]):
         assert trak.boxes[0].track_id == i + 1
+
+
+def test_image2mp4():
+    dir = "../test_datasets/mini_dataset_to_transcode/0001"
+    name = "n02100735_8211.JPEG"
+    out = "n02100735_8211.mp4"
+
+    try:
+        args = parse_args(["--codec=h265", "--tile=512:512:yuv420", "--crf=10",
+                           "--output={}".format(out),
+                           "--primary", "--thumb", "--name={}".format(name),
+                           "--item=path={}/{}".format(dir, name),
+                           "--hidden", "--name=target", "--mime=application/octet-stream",
+                           "--item=type=mime,path={}/{}.target".format(dir, name)])
+
+        image2mp4(args)
+
+        bstr = ConstBitStream(filename=out)
+        ftyp, mdat, moov = list(Parser.parse(bstr))
+        for box in [ftyp, mdat, moov]:
+            box.load(bstr)
+        del bstr
+
+        assert ftyp.header.type == b"ftyp"
+        assert mdat.header.type == b"mdat"
+        assert moov.header.type == b"moov"
+
+        # MOOV.TRAK.MDIA.HDLR
+        trak = moov.boxes[1]
+        assert trak.boxes[-1].boxes[1].name == b"bzna_input\0"
+
+        trak = moov.boxes[2]
+        assert trak.boxes[-1].boxes[1].name == b"bzna_fname\0"
+
+        # MOOV.TRAK.MDIA.MINF.STBL
+        stbl = trak.boxes[-1].boxes[-1].boxes[-1]
+        # MOOV.TRAK.MDIA.MINF.STBL.STSZ
+        size = stbl.boxes[2].samples[0].entry_size
+        # MOOV.TRAK.MDIA.MINF.STBL.STCO
+        offset = stbl.boxes[4].entries[0].chunk_offset - \
+                 mdat.header.start_pos - mdat.header.header_size
+        assert mdat.data[offset:offset + size] == bytes(name, "utf-8")
+
+        trak = moov.boxes[3]
+        assert trak.boxes[-1].boxes[1].name == b"bzna_target\0"
+
+        # MOOV.TRAK.MDIA.MINF.STBL
+        stbl = trak.boxes[-1].boxes[-1].boxes[-1]
+        # MOOV.TRAK.MDIA.MINF.STBL.STSZ
+        size = stbl.boxes[2].samples[0].entry_size
+        # MOOV.TRAK.MDIA.MINF.STBL.STCO
+        offset = stbl.boxes[4].entries[0].chunk_offset - \
+                 mdat.header.start_pos - mdat.header.header_size
+        assert mdat.data[offset:offset + size] == int.to_bytes(1, 8, "little")
+
+        trak = moov.boxes[4]
+        assert trak.boxes[-1].boxes[1].name == b"bzna_thumb\0"
+
+    finally:
+        shutil.rmtree(".", ignore_errors=True)
 
 
 def test_parse_args():

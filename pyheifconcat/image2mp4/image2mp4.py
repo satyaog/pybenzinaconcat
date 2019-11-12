@@ -52,7 +52,7 @@ def _clean_boxes(boxes):
             # "\x00\x00\x08" trak size in not in pixel but in aspect ratio
             tkhd.header.flags = b"\x00\x00\x00" if i == 0 else b"\x00\x00\x03"
 
-            hdlr.name = b"bzna_input" if i == 0 else b"bzna_thumb"
+            hdlr.name = b"bzna_input\0" if i == 0 else b"bzna_thumb\0"
 
     ftyp.major_brand = 1769172845           # b"isom"
     ftyp.minor_version = 0
@@ -118,7 +118,7 @@ def make_filenames_trak(mdat, mdat_start_pos, filenames):
     mdat.header.box_size = mdat.header.box_size + sum(sizes)
 
     filename_trak = make_meta_trak(creation_time, modification_time,
-                                   b"bzna_fname",
+                                   b"bzna_fname\0",
                                    sizes, chunk_offset)
 
     # MOOV.TRAK.TKHD
@@ -151,7 +151,7 @@ def make_targets_trak(mdat, mdat_start_pos, mime, targets):
     mdat.header.box_size = mdat.header.box_size + sum(sizes)
 
     target_trak = make_meta_trak(creation_time, modification_time,
-                                 b"bzna_target",
+                                 b"bzna_target\0",
                                  sizes, chunk_offset)
 
     # MOOV.TRAK.TKHD
