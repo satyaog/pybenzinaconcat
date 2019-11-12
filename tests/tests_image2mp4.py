@@ -6,7 +6,7 @@ from pybzparse import Parser, boxes as bx_def
 from pybzparse.headers import BoxHeader
 
 from pyheifconcat.image2mp4.image2mp4 import clap_traks, _clean_boxes, \
-    insert_filenames_trak, insert_targets_trak, \
+    make_filenames_trak, make_targets_trak, \
     reset_traks_id, parse_args
 
 
@@ -130,24 +130,14 @@ def test_clap_traks():
     assert clap.vert_off_d == 2
 
 
-def test_insert_filenames_trak():
+def test_make_filenames_trak():
     # MDAT
     mdat = bx_def.MDAT(BoxHeader())
     mdat.header.type = b"mdat"
     mdat.data = (b"0123456789",)
     mdat.refresh_box_size()
 
-    traks = [bx_def.TRAK(BoxHeader()), bx_def.TRAK(BoxHeader()),
-             bx_def.TRAK(BoxHeader())]
-
-    insert_filenames_trak(traks, mdat, 20, [b"0001/n02100735_8211.JPEG"])
-
-    assert len(traks) == 4
-    assert mdat.header.box_size == 42
-    assert len(mdat.data) == 34
-    assert mdat.data[-24:] == b"0001/n02100735_8211.JPEG"
-
-    filename_trak = traks[1]
+    filename_trak = make_filenames_trak(mdat, 20, [b"0001/n02100735_8211.JPEG"])
 
     # MOOV.TRAK.TKHD
     assert filename_trak.boxes[0].header.flags == b"\x00\x00\x03"
@@ -172,45 +162,35 @@ def test_insert_filenames_trak():
     assert stsz.entries[0].chunk_offset == 38
 
 
-def test_insert_targets_trak():
+def test_make_targets_trak():
     # MDAT
     mdat = bx_def.MDAT(BoxHeader())
     mdat.header.type = b"mdat"
     mdat.data = (b"0123456789",)
     mdat.refresh_box_size()
 
-    traks = [bx_def.TRAK(BoxHeader()), bx_def.TRAK(BoxHeader()),
-             bx_def.TRAK(BoxHeader())]
-
-    insert_targets_trak(traks, mdat, 20, "application/octet-stream",
-                        [int.to_bytes(100, 8, byteorder="little")])
-
-    assert len(traks) == 4
-    assert mdat.header.box_size == 26
-    assert len(mdat.data) == 18
-    assert int.from_bytes(mdat.data[-8:], "little") == 100
-
-    filename_trak = traks[1]
+    target_trak = make_targets_trak(mdat, 20, "application/octet-stream",
+                                    [int.to_bytes(100, 8, byteorder="little")])
 
     # MOOV.TRAK.TKHD
-    assert filename_trak.boxes[0].header.flags == b"\x00\x00\x00"
-    assert filename_trak.boxes[0].width == 0
-    assert filename_trak.boxes[0].height == 0
+    assert target_trak.boxes[0].header.flags == b"\x00\x00\x00"
+    assert target_trak.boxes[0].width == 0
+    assert target_trak.boxes[0].height == 0
 
     # MOOV.TRAK.MDIA.HDLR
-    assert filename_trak.boxes[1].boxes[1].name == b"bzna_target"
+    assert target_trak.boxes[1].boxes[1].name == b"bzna_target"
 
     # MOOV.TRAK.MDIA.MINF.STBL.STSD.METT
-    mett = filename_trak.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0]
+    mett = target_trak.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0]
     assert mett.mime_format == b"application/octet-stream\0"
 
     # MOOV.TRAK.MDIA.MINF.STBL.STSZ
-    stsz = filename_trak.boxes[-1].boxes[-1].boxes[-1].boxes[2]
+    stsz = target_trak.boxes[-1].boxes[-1].boxes[-1].boxes[2]
     assert stsz.sample_count == 1
     assert stsz.samples[0].entry_size == 8
 
     # MOOV.TRAK.MDIA.MINF.STBL.STCO
-    stsz = filename_trak.boxes[-1].boxes[-1].boxes[-1].boxes[4]
+    stsz = target_trak.boxes[-1].boxes[-1].boxes[-1].boxes[4]
     assert stsz.entry_count == 1
     assert stsz.entries[0].chunk_offset == 38
 

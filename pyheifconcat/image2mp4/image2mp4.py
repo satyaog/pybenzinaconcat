@@ -107,7 +107,7 @@ def clap_traks(traks, width, height, thumb_width, thumb_height):
             _vc1.append(pasp)
 
 
-def insert_filenames_trak(traks, mdat, mdat_start_pos, filenames):
+def make_filenames_trak(mdat, mdat_start_pos, filenames):
     creation_time = 0
     modification_time = creation_time
 
@@ -137,10 +137,10 @@ def insert_filenames_trak(traks, mdat, mdat_start_pos, filenames):
     mett = filename_trak.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0]
     mett.mime_format = b"text/plain\0"
 
-    traks[:] = traks[0:1] + [filename_trak] + traks[1:]
+    return filename_trak
 
 
-def insert_targets_trak(traks, mdat, mdat_start_pos, mime, targets):
+def make_targets_trak(mdat, mdat_start_pos, mime, targets):
     creation_time = 0
     modification_time = creation_time
 
@@ -170,7 +170,7 @@ def insert_targets_trak(traks, mdat, mdat_start_pos, mime, targets):
     mett = target_trak.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0]
     mett.mime_format = bytes(mime, "utf8") + b"\0"
 
-    traks[:] = traks[0:1] + [target_trak] + traks[1:]
+    return target_trak
 
 
 def reset_traks_id(moov):
@@ -281,8 +281,19 @@ def i2m_frame_scale_and_pad(src, dest, src_width, src_height, codec, crf,
 
 
 def image2mp4(args):
-    src_item, target_item = args.items if len(args.items) == 2 \
-                            else (args.items[0], None)
+    src_item, target_item = None, None
+    for item in args.items:
+        if item.primary:
+            if src_item is not None:
+                raise RuntimeError("Multiple primary items provided")
+            src_item = item
+        elif item.name == "target":
+            if target_item is not None:
+                raise RuntimeError("Multiple target items provided")
+            target_item = item
+        else:
+            raise RuntimeError("Unknown item name [{}]".format(item.name))
+
     tile = args.tile
 
     with Image.open(src_item.item.path) as src_file:
@@ -309,10 +320,13 @@ def image2mp4(args):
 
     if target_item is not None:
         with open(target_item.item.path, "rb") as target_file:
-            insert_targets_trak(traks, mdat, ftyp.header.box_size, target_item.mime,
-                                [target_file.read()])
-    insert_filenames_trak(traks, mdat, ftyp.header.box_size,
-                          [bytes(src_item.name, "utf8")])
+            target_trak = make_targets_trak(mdat, ftyp.header.box_size,
+                                            target_item.mime, [target_file.read()])
+            traks[:] = traks[0:1] + [target_trak] + traks[1:]
+
+    filename_trak = make_filenames_trak(mdat, ftyp.header.box_size,
+                                        [bytes(src_item.name, "utf8")])
+    traks[:] = traks[0:1] + [filename_trak] + traks[1:]
     clap_traks(traks, src_width, src_height, thumb_width, thumb_height)
 
     for trak in traks:
