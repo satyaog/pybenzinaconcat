@@ -1,1 +1,1 @@
-from .create_container import create_container, parse_args
+from .index_metadata import index_metadata, parse_args

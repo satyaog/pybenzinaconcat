@@ -1,2 +1,2 @@
-from .create_container import create_container, parse_args
-create_container(parse_args())
+from .index_metadata import index_metadata, parse_args
+index_metadata(parse_args())

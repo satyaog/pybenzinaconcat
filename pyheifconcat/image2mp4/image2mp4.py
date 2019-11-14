@@ -109,7 +109,7 @@ def clap_traks(traks, width, height, thumb_width, thumb_height):
 
 def make_filenames_trak(mdat, mdat_start_pos, filenames):
     creation_time = 0
-    modification_time = creation_time
+    modification_time = 0
 
     chunk_offset = mdat_start_pos + mdat.header.box_size
     sizes = [len(filename) for filename in filenames]
@@ -142,7 +142,7 @@ def make_filenames_trak(mdat, mdat_start_pos, filenames):
 
 def make_targets_trak(mdat, mdat_start_pos, mime, targets):
     creation_time = 0
-    modification_time = creation_time
+    modification_time = 0
 
     chunk_offset = mdat_start_pos + mdat.header.box_size
     sizes = [8] * len(targets)
