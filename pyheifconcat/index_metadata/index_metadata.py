@@ -148,8 +148,8 @@ def index_metadata(args):
     del samples_bstr
 
     # If the box content length is not set in the header
-    if mdat.header.box_size == mdat.header.header_size:
-        mdat.header.box_size = container_len - mdat.header.start_pos
+    if mdat.header.box_ext_size == mdat.header.header_size:
+        mdat.header.box_ext_size = container_len - mdat.header.start_pos
 
     # Update mdat header
     with open(container_filename, "rb+") as file:
@@ -274,7 +274,7 @@ def index_metadata(args):
                 container_file.write(filename)
                 container_len += len(filename)
 
-    mdat.header.box_size = container_len - mdat.header.start_pos
+    mdat.header.box_ext_size = container_len - mdat.header.start_pos
 
     with open(container_filename, "rb+") as file:
         file.seek(mdat.header.start_pos)

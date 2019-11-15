@@ -27,7 +27,7 @@ def test_create_container():
         assert os.path.exists(container_name)
 
         bstr = ConstBitStream(filename=container_name)
-        boxes = [box for box in Parser.parse(bstr)]
+        boxes = list(Parser.parse(bstr))
         for box in boxes:
             box.load(bstr)
 
@@ -44,6 +44,10 @@ def test_create_container():
         mdat = boxes.pop(0)
         isinstance(mdat, bx_def.MDAT)
         assert mdat.header.type == b"mdat"
+        # mdat should be using the box extended size field to prevent having to
+        # shift data if it is bigger than the limit of the regular box size field
+        assert mdat.header.box_ext_size is not None
+        assert mdat.header.box_ext_size > 0
         assert mdat.data == b''
 
     finally:

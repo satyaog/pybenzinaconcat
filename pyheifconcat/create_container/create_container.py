@@ -17,6 +17,11 @@ def create_container(args):
     mdat = bx_def.MDAT(BoxHeader())
     mdat.header.type = b"mdat"
     mdat.data = b''
+
+    # Force the usage of box_ext_size in the computation of the box size to
+    # prevent having to shift data if it ends up being bigger than the limit of
+    # box_size
+    mdat.header.box_ext_size = 0
     mdat.refresh_box_size()
 
     args.container.write(bytes(ftyp) + bytes(mdat))
