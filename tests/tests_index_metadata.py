@@ -40,9 +40,9 @@ def test_index_metadata():
         moov = next(find_boxes(boxes, b"moov"))
         moov.load(bstr)
 
-        samples = [get_trak_sample(bstr, moov.boxes, b"bzna_input\0", i) for i in range(9)]
-        targets = [get_trak_sample(bstr, moov.boxes, b"bzna_target\0", i) for i in range(9)]
-        filenames = [get_trak_sample(bstr, moov.boxes, b"bzna_fname\0", i) for i in range(9)]
+        samples = [get_trak_sample(bstr, moov.boxes, b"bzna_input\0", i) for i in range(10)]
+        targets = [get_trak_sample(bstr, moov.boxes, b"bzna_target\0", i) for i in range(10)]
+        filenames = [get_trak_sample(bstr, moov.boxes, b"bzna_fname\0", i) for i in range(10)]
 
         for sample, target, filename in zip(samples, targets, filenames):
             sample_bstr = ConstBitStream(bytes=sample)
@@ -78,9 +78,9 @@ def test_retry_index_metadata():
         moov = next(find_boxes(boxes, b"moov"))
         moov.load(bstr)
 
-        samples = [get_trak_sample(bstr, moov.boxes, b"bzna_input\0", i) for i in range(9)]
-        targets = [get_trak_sample(bstr, moov.boxes, b"bzna_target\0", i) for i in range(9)]
-        filenames = [get_trak_sample(bstr, moov.boxes, b"bzna_fname\0", i) for i in range(9)]
+        samples = [get_trak_sample(bstr, moov.boxes, b"bzna_input\0", i) for i in range(10)]
+        targets = [get_trak_sample(bstr, moov.boxes, b"bzna_target\0", i) for i in range(10)]
+        filenames = [get_trak_sample(bstr, moov.boxes, b"bzna_fname\0", i) for i in range(10)]
 
         for sample, target, filename in zip(samples, targets, filenames):
             sample_bstr = ConstBitStream(bytes=sample)

@@ -227,6 +227,10 @@ def index_metadata(args):
             sample_bstr = ConstBitStream(filename=container_filename,
                                          offset=sample_offset.chunk_offset * 8)
             target = get_trak_sample(sample_bstr, sample_moov.boxes, b"bzna_target\0", 0)
+            # Test subset reached
+            if target is None:
+                break
+
             targets.append(target)
             samples_sizes.append(len(target))
 
