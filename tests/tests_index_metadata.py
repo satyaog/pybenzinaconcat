@@ -9,6 +9,7 @@ from pybzparse.utils import get_trak_sample, find_boxes
 
 from pyheifconcat.index_metadata import index_metadata, parse_args
 
+DATA_DIR = os.path.abspath("test_datasets")
 
 PWD = "tests_tmp"
 
@@ -25,7 +26,7 @@ def _md5(filename):
 
 def test_index_metadata():
     container_filename = "concat.bzna"
-    shutil.copyfile("../test_datasets/mini_dataset_to_concat/concat.bzna",
+    shutil.copyfile(os.path.join(DATA_DIR, "mini_dataset_to_concat/concat.bzna"),
                     container_filename, follow_symlinks=True)
 
     try:
@@ -56,7 +57,7 @@ def test_index_metadata():
             sample_moov.load(sample_bstr)
             sample_mp4_filename = os.path.splitext(filename.decode("utf-8"))[0] + ".mp4"
             assert hashlib.md5(sample).hexdigest() == \
-                   _md5(os.path.join("../test_datasets/mini_dataset_to_transcode",
+                   _md5(os.path.join(DATA_DIR, "mini_dataset_to_transcode",
                                      sample_mp4_filename))
             assert target == get_trak_sample(sample_bstr, sample_moov.boxes, b"bzna_target\0", 0)
             assert filename == get_trak_sample(sample_bstr, sample_moov.boxes, b"bzna_fname\0", 0)
@@ -67,7 +68,7 @@ def test_index_metadata():
 
 def test_index_metadata_second_pass():
     container_filename = "concat_indexed.bzna"
-    shutil.copyfile("../test_datasets/mini_dataset_to_concat/concat_indexed.bzna",
+    shutil.copyfile(os.path.join(DATA_DIR, "mini_dataset_to_concat/concat_indexed.bzna"),
                     container_filename, follow_symlinks=True)
 
     try:

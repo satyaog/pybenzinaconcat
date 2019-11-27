@@ -11,6 +11,7 @@ from pyheifconcat.image2mp4 import image2mp4, parse_args
 from pyheifconcat.image2mp4.image2mp4 import clap_traks, _clean_boxes, \
     make_filenames_trak, make_targets_trak, reset_traks_id
 
+DATA_DIR = os.path.abspath("test_datasets")
 
 PWD = "tests_tmp"
 
@@ -21,7 +22,7 @@ os.chdir(PWD)
 
 
 def test__clean_boxes():
-    src = "../test_datasets/transcode_steps/n02100735_8211.mp4"
+    src = os.path.join(DATA_DIR, "transcode_steps/n02100735_8211.mp4")
 
     bstr = ConstBitStream(filename=src)
     boxes = [box for box in Parser.parse(bstr)]
@@ -72,7 +73,7 @@ def test__clean_boxes():
 
 
 def test_clap_traks():
-    src = "../test_datasets/transcode_steps/n02100735_8211.mp4"
+    src = os.path.join(DATA_DIR, "transcode_steps/n02100735_8211.mp4")
     width = 600
     height = 535
     thumb_width = 512
@@ -220,7 +221,7 @@ def test_reset_traks_id():
 
 
 def test_image2mp4():
-    dir = "../test_datasets/mini_dataset_to_transcode/0001"
+    dir = os.path.join(DATA_DIR, "mini_dataset_to_transcode/0001")
     name = "n02100735_8211.JPEG"
     out = "n02100735_8211.mp4"
 

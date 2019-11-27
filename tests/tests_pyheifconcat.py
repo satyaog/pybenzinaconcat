@@ -6,7 +6,7 @@ from pyheifconcat.pyheifconcat import FILENAME_TEMPLATE, _get_file_index, \
     concat, extract_archive, transcode, parse_args
 
 TESTS_WORKING_DIR = os.path.abspath('.')
-DATA_DIR = os.path.abspath("./test_datasets")
+DATA_DIR = os.path.abspath("test_datasets")
 
 os.environ["PATH"] = ':'.join([os.environ["PATH"],
                                os.path.join(TESTS_WORKING_DIR, "mocks")])
@@ -750,7 +750,7 @@ def test_extract_tar_start_number_transcode():
 
 
 def test_extract_tar_start_number_transcode_mp4():
-    src = os.path.join(DATA_DIR, "dev_im_net.tar")
+    src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
     dest = "./"
     tmp = "extract/"
     dest_dir = os.path.dirname(dest)
@@ -830,7 +830,7 @@ def test_extract_tar_start_number_transcode_mp4():
 
 
 def test_extract_tar_start_number_transcode_excludes():
-    src = os.path.join(DATA_DIR, "dev_im_net.tar")
+    src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
     dest = "./"
     tmp = "extract/"
     dest_dir = os.path.dirname(dest)
