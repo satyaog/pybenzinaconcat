@@ -13,7 +13,7 @@ from pybzparse.utils import get_trak_sample, find_boxes, find_traks, \
 def _get_samples_boxes(samples_bstr):
     # Parse samples mp4 boxes
     samples_boxes = []
-    sample_parser = Parser.parse(samples_bstr)
+    sample_parser = Parser.parse(samples_bstr, recursive=False)
     while samples_bstr.bitpos < samples_bstr.length:
         sample_header = Parser.parse_header(samples_bstr)
         # Done reading samples
@@ -25,17 +25,7 @@ def _get_samples_boxes(samples_bstr):
         # Parse MDAT
         samples_boxes.append(next(sample_parser))
         # Parse MOOV
-        sample_moov = next(sample_parser)
-        samples_boxes.append(sample_moov)
-
-        for trak in find_boxes(sample_moov.boxes, b"trak"):
-            # TRAK.MDIA.MINF.STBL
-            stbl = trak.boxes[-1].boxes[-1].boxes[-1]
-            next(find_boxes(stbl.boxes, b"stco")).load(samples_bstr)
-            next(find_boxes(stbl.boxes, b"stsz")).load(samples_bstr)
-
-        samples_bstr.bytepos = sample_moov.header.start_pos + \
-                               sample_moov.header.box_size
+        samples_boxes.append(next(sample_parser))
 
     return samples_boxes
 
@@ -222,17 +212,29 @@ def index_metadata(args):
         targets = []
         samples_sizes = []
 
+        samples_bstr = ConstBitStream(filename=container_filename, offset=mdat_data_offset * 8)
         for sample_moov, sample_offset in zip(find_boxes(samples_boxes, b"moov"),
                                               samples_offsets.entries):
+            samples_bstr.bytepos = sample_moov.header.start_pos
+            # Create a new tmp object to hold the content
+            tmp_sample_moov = next(Parser.parse(samples_bstr))
+
+            for trak in find_traks(tmp_sample_moov.boxes, b"bzna_target\0"):
+                # TRAK.MDIA.MINF.STBL
+                stbl = trak.boxes[-1].boxes[-1].boxes[-1]
+                next(find_boxes(stbl.boxes, b"stco")).load(samples_bstr)
+                next(find_boxes(stbl.boxes, b"stsz")).load(samples_bstr)
+
             sample_bstr = ConstBitStream(filename=container_filename,
                                          offset=sample_offset.chunk_offset * 8)
-            target = get_trak_sample(sample_bstr, sample_moov.boxes, b"bzna_target\0", 0)
+            target = get_trak_sample(sample_bstr, tmp_sample_moov.boxes, b"bzna_target\0", 0)
             # Test subset reached
             if target is None:
                 break
 
             targets.append(target)
             samples_sizes.append(len(target))
+        del samples_bstr
 
         # MOOV.TRAK
         trak = _make_bzna_target_trak(samples_sizes, samples_offset, mvhd.next_track_id)
@@ -255,13 +257,25 @@ def index_metadata(args):
         filenames = []
         samples_sizes = []
 
+        samples_bstr = ConstBitStream(filename=container_filename, offset=mdat_data_offset * 8)
         for sample_moov, sample_offset in zip(find_boxes(samples_boxes, b"moov"),
                                               samples_offsets.entries):
+            samples_bstr.bytepos = sample_moov.header.start_pos
+            # Create a new tmp object to hold the content
+            tmp_sample_moov = next(Parser.parse(samples_bstr))
+
+            for trak in find_traks(tmp_sample_moov.boxes, b"bzna_fname\0"):
+                # TRAK.MDIA.MINF.STBL
+                stbl = trak.boxes[-1].boxes[-1].boxes[-1]
+                next(find_boxes(stbl.boxes, b"stco")).load(samples_bstr)
+                next(find_boxes(stbl.boxes, b"stsz")).load(samples_bstr)
+
             sample_bstr = ConstBitStream(filename=container_filename,
                                          offset=sample_offset.chunk_offset * 8)
-            filename = get_trak_sample(sample_bstr, sample_moov.boxes, b"bzna_fname\0", 0)
+            filename = get_trak_sample(sample_bstr, tmp_sample_moov.boxes, b"bzna_fname\0", 0)
             filenames.append(filename)
             samples_sizes.append(len(filename))
+        del samples_bstr
 
         # MOOV.TRAK
         trak = _make_bzna_fname_trak(samples_sizes, samples_offset, mvhd.next_track_id)
