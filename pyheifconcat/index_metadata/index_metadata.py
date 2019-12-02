@@ -204,7 +204,7 @@ def index_metadata(args):
     samples_trak = next(find_traks(moov.boxes, b"bzna_input\0"))
     # TRAK.MDIA.MINF.STBL
     stbl = samples_trak.boxes[-1].boxes[-1].boxes[-1]
-    samples_offsets = next(find_boxes(stbl.boxes, b"stco"))
+    samples_offsets = next(find_boxes(stbl.boxes, [b"stco", b"co64"]))
 
     # bzna_target trak
     if next(find_traks(moov.boxes, b"bzna_target\0"), None) is None:
@@ -222,7 +222,7 @@ def index_metadata(args):
             for trak in find_traks(tmp_sample_moov.boxes, b"bzna_target\0"):
                 # TRAK.MDIA.MINF.STBL
                 stbl = trak.boxes[-1].boxes[-1].boxes[-1]
-                next(find_boxes(stbl.boxes, b"stco")).load(samples_bstr)
+                next(find_boxes(stbl.boxes, [b"stco", b"co64"])).load(samples_bstr)
                 next(find_boxes(stbl.boxes, b"stsz")).load(samples_bstr)
 
             sample_bstr = ConstBitStream(filename=container_filename,
@@ -267,7 +267,7 @@ def index_metadata(args):
             for trak in find_traks(tmp_sample_moov.boxes, b"bzna_fname\0"):
                 # TRAK.MDIA.MINF.STBL
                 stbl = trak.boxes[-1].boxes[-1].boxes[-1]
-                next(find_boxes(stbl.boxes, b"stco")).load(samples_bstr)
+                next(find_boxes(stbl.boxes, [b"stco", b"co64"])).load(samples_bstr)
                 next(find_boxes(stbl.boxes, b"stsz")).load(samples_bstr)
 
             sample_bstr = ConstBitStream(filename=container_filename,
