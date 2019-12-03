@@ -47,11 +47,34 @@ def test_index_metadata():
         moov = next(find_boxes(boxes, b"moov"))
         moov.load(bstr)
 
+        explicit_targets = [b'\x01\x00\x00\x00\x00\x00\x00\x00',
+                            b'\x01\x00\x00\x00\x00\x00\x00\x00',
+                            b'\x01\x00\x00\x00\x00\x00\x00\x00',
+                            b'\x02\x00\x00\x00\x00\x00\x00\x00',
+                            b'\x02\x00\x00\x00\x00\x00\x00\x00',
+                            b'\x02\x00\x00\x00\x00\x00\x00\x00',
+                            b'\x00\x00\x00\x00\x00\x00\x00\x00',
+                            b'\x00\x00\x00\x00\x00\x00\x00\x00',
+                            b'\x00\x00\x00\x00\x00\x00\x00\x00',
+                            None]
+
+        explicit_filenames = [b'n02100735_7054.JPEG',
+                              b'n02100735_7553.JPEG',
+                              b'n02100735_8211.JPEG',
+                              b'n02110185_2014.JPEG',
+                              b'n02110185_679.JPEG',
+                              b'n02110185_7939.JPEG',
+                              b'n02119789_11296.JPEG',
+                              b'n02119789_4903.JPEG',
+                              b'n02119789_6970.JPEG',
+                              b'n02100735_8211_fake_no_target.JPEG']
+
         samples = [get_trak_sample(bstr, moov.boxes, b"bzna_input\0", i) for i in range(10)]
         targets = [get_trak_sample(bstr, moov.boxes, b"bzna_target\0", i) for i in range(10)]
         filenames = [get_trak_sample(bstr, moov.boxes, b"bzna_fname\0", i) for i in range(10)]
+        thumbs = [get_trak_sample(bstr, moov.boxes, b"bzna_thumb\0", i) for i in range(10)]
 
-        for sample, target, filename in zip(samples, targets, filenames):
+        for i, (sample, target, filename, thumb) in enumerate(zip(samples, targets, filenames, thumbs)):
             sample_bstr = ConstBitStream(bytes=sample)
             sample_moov = next(find_boxes(Parser.parse(sample_bstr), b"moov"))
             sample_moov.load(sample_bstr)
@@ -59,8 +82,11 @@ def test_index_metadata():
             assert hashlib.md5(sample).hexdigest() == \
                    _md5(os.path.join(DATA_DIR, "mini_dataset_to_transcode",
                                      sample_mp4_filename))
+            assert target == explicit_targets[i]
             assert target == get_trak_sample(sample_bstr, sample_moov.boxes, b"bzna_target\0", 0)
+            assert filename == explicit_filenames[i]
             assert filename == get_trak_sample(sample_bstr, sample_moov.boxes, b"bzna_fname\0", 0)
+            assert thumb == get_trak_sample(sample_bstr, sample_moov.boxes, b"bzna_thumb\0", 0)
 
     finally:
         shutil.rmtree(".", ignore_errors=True)

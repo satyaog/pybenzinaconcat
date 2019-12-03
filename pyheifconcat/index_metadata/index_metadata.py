@@ -7,7 +7,7 @@ from bitstring import ConstBitStream, ReadError
 from pybzparse import Parser, boxes as bx_def
 from pybzparse.headers import BoxHeader
 from pybzparse.utils import get_trak_sample, find_boxes, find_traks, \
-                            make_meta_trak, make_mvhd
+                            make_meta_trak, make_vide_trak, make_mvhd
 
 
 def _get_samples_headers(file):
@@ -112,6 +112,44 @@ def _make_bzna_fname_trak(samples_sizes, samples_offset, track_id):
     # MOOV.TRAK.MDIA.MINF.STBL.STSD.METT
     mett = trak.boxes[-1].boxes[-1].boxes[-1].boxes[0].boxes[0]
     mett.mime_format = b'text/plain\0'
+
+    return trak
+
+
+def _make_bzna_thumb_trak(hvc1, samples_sizes, samples_offsets, track_id):
+    creation_time = 0
+    modification_time = 0
+
+    # MOOV.TRAK
+    trak = make_vide_trak(creation_time, modification_time, b"bzna_thumb\0",
+                          samples_sizes, samples_offsets)
+
+    # MOOV.TRAK.TKHD
+    tkhd = trak.boxes[0]
+
+    # "\x00\x00\x01" trak is enabled
+    # "\x00\x00\x02" trak is used in the presentation
+    # "\x00\x00\x04" trak is used in the preview
+    # "\x00\x00\x08" trak size in not in pixel but in aspect ratio
+    tkhd.header.flags = b"\x00\x00\x03"
+    tkhd.track_id = track_id
+    tkhd.width = [512, 512]
+    tkhd.height = [512, 512]
+
+    # MOOV.TRAK.MDIA.MINF.STBL.STSD
+    stsd = trak.boxes[-1].boxes[-1].boxes[-1].boxes[0]
+    # pop _VC1
+    stsd.pop()
+
+    hvc1_bstr = ConstBitStream(bytes(hvc1))
+    hvc1 = next(Parser.parse(hvc1_bstr))
+    hvc1.load(hvc1_bstr)
+
+    # pop CLAP and PASP
+    hvc1.pop()
+    hvc1.pop()
+
+    stsd.append(hvc1)
 
     return trak
 
@@ -286,6 +324,46 @@ def index_metadata(args):
             for filename in filenames:
                 container_file.write(filename)
                 container_len += len(filename)
+
+    # bzna_thumb trak
+    if next(find_traks(moov.boxes, b"bzna_thumb\0"), None) is None:
+        hvc1 = None
+        offsets = []
+        sizes = []
+
+        with open(container_filename, "rb") as file:
+            for offset, size in zip((o.chunk_offset for o in samples_offsets.entries),
+                                    (s.entry_size for s in samples_sizes.samples)):
+                file.seek(offset)
+                sample_bstr = ConstBitStream(file.read(size))
+                # Create a new tmp object to hold the content
+                sample_moov = next(find_boxes(Parser.parse(sample_bstr), b"moov"))
+                sample_moov.load(sample_bstr)
+
+                # MOOV.TRAK
+                trak = next(find_traks(sample_moov.boxes, b"bzna_thumb\0"))
+                # MOOV.TRAK.MDIA.MINF.STBL
+                stbl = trak.boxes[-1].boxes[-1].boxes[-1]
+                co = next(find_boxes(stbl.boxes, [b"stco", b"co64"]))
+                stsz = next(find_boxes(stbl.boxes, b"stsz"))
+
+                if hvc1 is None:
+                    # MOOV.TRAK.MDIA.MINF.STBL.STSD._VC1
+                    hvc1 = stbl.boxes[0].boxes[-1]
+
+                offsets.append(offset + co.entries[0].chunk_offset)
+                sizes.append(stsz.sample_size)
+
+        # MOOV.TRAK
+        trak = _make_bzna_thumb_trak(hvc1, sizes, offsets, mvhd.next_track_id)
+
+        moov.append(trak)
+        mvhd.next_track_id += 1
+
+        moov.refresh_box_size()
+
+        with open(moov_filename, "wb") as moov_file:
+            moov_file.write(bytes(moov))
 
     mdat.header.box_ext_size = container_len - mdat.header.start_pos
 
