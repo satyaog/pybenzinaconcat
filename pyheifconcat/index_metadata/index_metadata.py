@@ -6,7 +6,7 @@ from bitstring import ConstBitStream, ReadError
 
 from pybzparse import Parser, boxes as bx_def
 from pybzparse.headers import BoxHeader
-from pybzparse.utils import get_trak_sample, find_boxes, find_traks, \
+from pybzparse.utils import get_trak_sample_bytes, find_boxes, find_traks, \
                             make_meta_trak, make_vide_trak, make_mvhd
 
 
@@ -266,7 +266,8 @@ def index_metadata(args):
                 sample_moov = next(find_boxes(Parser.parse(sample_bstr), b"moov"))
                 sample_moov.load(sample_bstr)
 
-                target = get_trak_sample(sample_bstr, sample_moov.boxes, b"bzna_target\0", 0)
+                target = get_trak_sample_bytes(sample_bstr, sample_moov.boxes,
+                                               b"bzna_target\0", 0)
                 # Test subset is reached meaning that remaining entries will
                 # not contain a target
                 if target is None:
@@ -305,7 +306,8 @@ def index_metadata(args):
                 sample_moov = next(find_boxes(Parser.parse(sample_bstr), b"moov"))
                 sample_moov.load(sample_bstr)
 
-                filename = get_trak_sample(sample_bstr, sample_moov.boxes, b"bzna_fname\0", 0)
+                filename = get_trak_sample_bytes(sample_bstr, sample_moov.boxes,
+                                                 b"bzna_fname\0", 0)
 
                 filenames.append(filename)
                 sizes.append(len(filename))

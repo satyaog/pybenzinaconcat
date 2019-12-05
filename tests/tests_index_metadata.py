@@ -5,7 +5,7 @@ import shutil
 from bitstring import ConstBitStream
 
 from pybzparse import Parser
-from pybzparse.utils import get_trak_sample, find_boxes
+from pybzparse.utils import get_trak_sample_bytes, find_boxes
 
 from pyheifconcat.index_metadata import index_metadata, parse_args
 
@@ -69,10 +69,10 @@ def test_index_metadata():
                               b'n02119789_6970.JPEG',
                               b'n02100735_8211_fake_no_target.JPEG']
 
-        samples = [get_trak_sample(bstr, moov.boxes, b"bzna_input\0", i) for i in range(10)]
-        targets = [get_trak_sample(bstr, moov.boxes, b"bzna_target\0", i) for i in range(10)]
-        filenames = [get_trak_sample(bstr, moov.boxes, b"bzna_fname\0", i) for i in range(10)]
-        thumbs = [get_trak_sample(bstr, moov.boxes, b"bzna_thumb\0", i) for i in range(10)]
+        samples = [get_trak_sample_bytes(bstr, moov.boxes, b"bzna_input\0", i) for i in range(10)]
+        targets = [get_trak_sample_bytes(bstr, moov.boxes, b"bzna_target\0", i) for i in range(10)]
+        filenames = [get_trak_sample_bytes(bstr, moov.boxes, b"bzna_fname\0", i) for i in range(10)]
+        thumbs = [get_trak_sample_bytes(bstr, moov.boxes, b"bzna_thumb\0", i) for i in range(10)]
 
         for i, (sample, target, filename, thumb) in enumerate(zip(samples, targets, filenames, thumbs)):
             sample_bstr = ConstBitStream(bytes=sample)
@@ -83,10 +83,10 @@ def test_index_metadata():
                    _md5(os.path.join(DATA_DIR, "mini_dataset_to_transcode",
                                      sample_mp4_filename))
             assert target == explicit_targets[i]
-            assert target == get_trak_sample(sample_bstr, sample_moov.boxes, b"bzna_target\0", 0)
+            assert target == get_trak_sample_bytes(sample_bstr, sample_moov.boxes, b"bzna_target\0", 0)
             assert filename == explicit_filenames[i]
-            assert filename == get_trak_sample(sample_bstr, sample_moov.boxes, b"bzna_fname\0", 0)
-            assert thumb == get_trak_sample(sample_bstr, sample_moov.boxes, b"bzna_thumb\0", 0)
+            assert filename == get_trak_sample_bytes(sample_bstr, sample_moov.boxes, b"bzna_fname\0", 0)
+            assert thumb == get_trak_sample_bytes(sample_bstr, sample_moov.boxes, b"bzna_thumb\0", 0)
 
     finally:
         shutil.rmtree(".", ignore_errors=True)
