@@ -10,7 +10,7 @@ setup(
     author="Satya Ortiz-Gagne",
     author_email="satya.ortiz-gagne@mila.quebec",
     description="",
-    install_requires=["pybzparse @ git+https://github.com/satyaog/pybzparse.git@0.1.0", "pillow>=6.2.0"],
+    install_requires=["pybzparse @ https://github.com/satyaog/pybzparse.git@0.2.0", "pillow>=6.2.0"],
     setup_requires=["pytest-runner"],
     tests_require=["pytest>=5.0.1"],
     long_description="",
