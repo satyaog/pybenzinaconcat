@@ -167,7 +167,7 @@ def transcode_img(input_path, dest_dir, args):
         os.makedirs(tmp_dir)
 
     output_path = _make_transcoded_filepath(os.path.join(tmp_dir, filename))
-    command = "image2heif"
+    command = ["python", "image2mp4"] if args.mp4 else ["image2heif"]
     cmd_arguments = " --codec=h265 --tile=512:512:yuv420 --crf=10 " \
                     "--output={dest} " \
                     "--primary --thumb --name={name} " \
@@ -180,7 +180,7 @@ def transcode_img(input_path, dest_dir, args):
                          "--item=type=mime,path={target}" \
                          .format(target=target_path)
 
-    process = subprocess.Popen([command] +
+    process = subprocess.Popen(command +
                                ["--" + arg for arg in cmd_arguments.split(" --")[1:]])
     process.wait()
 
@@ -359,7 +359,8 @@ def single_process_extract_archive(args):
                          ','.join(extracted_filenames),
                          args.dest,
                          "--ssh-remote", args.ssh_remote,
-                         "--tmp", args.tmp])
+                         "--tmp", args.tmp] +
+                        (["--mp4"] if args.mp4 else []))
 
         transcode(transcode_args)
 
@@ -447,6 +448,8 @@ def build_transcode_parser():
                         help="the source file or ',' separated files to transcode")
     parser.add_argument("dest", metavar="destination",
                         help="the destination directory for the transcoded file(s)")
+    parser.add_argument("--mp4", default=False, action="store_true",
+                        help="use image2mp4 instead of image2heif")
     parser.add_argument("--ssh-remote", metavar="REMOTE",
                         help="optional remote to use to transfer the transcoded "
                              "file to destination")
@@ -484,6 +487,8 @@ def build_extract_archive_parser():
 
     parser.add_argument("--transcode", default=False, action="store_true",
                         help="follow the extraction with a transcoding")
+    parser.add_argument("--mp4", default=False, action="store_true",
+                        help="use image2mp4 instead of image2heif")
     parser.add_argument("--ssh-remote", metavar="REMOTE",
                         help="if --transcode is True, optional remote to "
                              "use to transfer the transcoded file to "

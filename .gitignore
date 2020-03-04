@@ -106,4 +106,4 @@ venv.bak/
 .idea/
 .DS_Store
 
-tests/test_dataset/
+tests/test_datasets/
