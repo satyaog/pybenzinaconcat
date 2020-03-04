@@ -4,10 +4,10 @@ import shutil
 
 from bitstring import ConstBitStream
 
-from pybzparse import Parser
-from pybzparse.utils import get_trak_sample_bytes, find_boxes
+from pybenzinaparse import Parser
+from pybenzinaparse.utils import get_trak_sample_bytes, find_boxes
 
-from pyheifconcat.index_metadata import index_metadata, parse_args
+from pybenzinaconcat.index_metadata import index_metadata, parse_args
 
 DATA_DIR = os.path.abspath("test_datasets")
 

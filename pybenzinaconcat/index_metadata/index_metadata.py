@@ -4,9 +4,9 @@ import sys
 
 from bitstring import ConstBitStream, ReadError
 
-from pybzparse import Parser, boxes as bx_def
-from pybzparse.headers import BoxHeader
-from pybzparse.utils import get_trak_sample_bytes, find_boxes, find_traks, \
+from pybenzinaparse import Parser, boxes as bx_def
+from pybenzinaparse.headers import BoxHeader
+from pybenzinaparse.utils import get_trak_sample_bytes, find_boxes, find_traks, \
                             make_meta_trak, make_vide_trak, make_mvhd
 
 

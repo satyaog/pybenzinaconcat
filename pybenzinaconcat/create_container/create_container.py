@@ -1,8 +1,8 @@
 import argparse
 import sys
 
-from pybzparse import boxes as bx_def
-from pybzparse.headers import BoxHeader
+from pybenzinaparse import boxes as bx_def
+from pybenzinaparse.headers import BoxHeader
 
 
 def create_container(args):

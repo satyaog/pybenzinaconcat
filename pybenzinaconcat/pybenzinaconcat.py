@@ -169,7 +169,7 @@ def transcode_img(input_path, dest_dir, args):
         os.makedirs(tmp_dir)
 
     output_path = _make_transcoded_filepath(os.path.join(tmp_dir, filename))
-    command = ["python", "-m", "pyheifconcat.image2mp4"] \
+    command = ["python", "-m", "pybenzinaconcat.image2mp4"] \
               if args.mp4 else ["image2heif"]
     cmd_arguments = " --codec=h265 --tile=512:512:yuv420 --crf=10 " \
                     "--output={dest} " \
@@ -547,7 +547,7 @@ def parse_args(raw_arguments=None):
     return ACTIONS_PARSER.get(base_args.action, None).parse_args(argv)
 
 
-def pyheifconcat(args):
+def pybenzinaconcat(args):
     ACTIONS.get(args.action, None)(args)
 
 

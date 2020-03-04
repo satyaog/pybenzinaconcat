@@ -3,12 +3,12 @@ import shutil
 
 from bitstring import ConstBitStream
 
-from pybzparse import Parser, boxes as bx_def
-from pybzparse.headers import BoxHeader
+from pybenzinaparse import Parser, boxes as bx_def
+from pybenzinaparse.headers import BoxHeader
 
-from pyheifconcat.image2mp4 import image2mp4, parse_args
+from pybenzinaconcat.image2mp4 import image2mp4, parse_args
 
-from pyheifconcat.image2mp4.image2mp4 import clap_traks, _clean_boxes, \
+from pybenzinaconcat.image2mp4.image2mp4 import clap_traks, _clean_boxes, \
     make_filenames_trak, make_targets_trak, reset_traks_id
 
 DATA_DIR = os.path.abspath("test_datasets")
