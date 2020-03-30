@@ -4,40 +4,35 @@ import sys
 
 from bitstring import ConstBitStream, ReadError
 
-from pybzparse import Parser, boxes as bx_def
-from pybzparse.headers import BoxHeader
-from pybzparse.utils import get_trak_sample, find_boxes, find_traks, \
-                            make_meta_trak, make_mvhd
+from pybenzinaparse import Parser, boxes as bx_def
+from pybenzinaparse.headers import BoxHeader
+from pybenzinaparse.utils import get_trak_sample_bytes, find_boxes, find_traks, \
+                            make_meta_trak, make_vide_trak, make_mvhd
 
 
-def _get_samples_boxes(samples_bstr):
+def _get_samples_headers(file):
     # Parse samples mp4 boxes
-    samples_boxes = []
-    sample_parser = Parser.parse(samples_bstr)
-    while samples_bstr.bitpos < samples_bstr.length:
-        sample_header = Parser.parse_header(samples_bstr)
+    samples_headers = []
+
+    headers = (Parser.parse_header(ConstBitStream(chunk))
+               for chunk in iter(lambda: file.read(32), b''))
+    for header in headers:
         # Done reading samples
-        if sample_header.type != b"ftyp":
+        if header.type != b"ftyp":
             break
-        samples_bstr.bytepos = sample_header.start_pos
         # Parse FTYP
-        samples_boxes.append(next(sample_parser))
+        samples_headers.append(header)
+        file.seek(file.tell() - 32 + header.box_size)
         # Parse MDAT
-        samples_boxes.append(next(sample_parser))
+        header = next(headers)
+        samples_headers.append(header)
+        file.seek(file.tell() - 32 + header.box_size)
         # Parse MOOV
-        sample_moov = next(sample_parser)
-        samples_boxes.append(sample_moov)
+        header = next(headers)
+        samples_headers.append(header)
+        file.seek(file.tell() - 32 + header.box_size)
 
-        for trak in find_boxes(sample_moov.boxes, b"trak"):
-            # TRAK.MDIA.MINF.STBL
-            stbl = trak.boxes[-1].boxes[-1].boxes[-1]
-            next(find_boxes(stbl.boxes, b"stco")).load(samples_bstr)
-            next(find_boxes(stbl.boxes, b"stsz")).load(samples_bstr)
-
-        samples_bstr.bytepos = sample_moov.header.start_pos + \
-                               sample_moov.header.box_size
-
-    return samples_boxes
+    return samples_headers
 
 
 def _make_bzna_input_trak(samples_sizes, samples_offset, track_id):
@@ -121,6 +116,44 @@ def _make_bzna_fname_trak(samples_sizes, samples_offset, track_id):
     return trak
 
 
+def _make_bzna_thumb_trak(hvc1, samples_sizes, samples_offsets, track_id):
+    creation_time = 0
+    modification_time = 0
+
+    # MOOV.TRAK
+    trak = make_vide_trak(creation_time, modification_time, b"bzna_thumb\0",
+                          samples_sizes, samples_offsets)
+
+    # MOOV.TRAK.TKHD
+    tkhd = trak.boxes[0]
+
+    # "\x00\x00\x01" trak is enabled
+    # "\x00\x00\x02" trak is used in the presentation
+    # "\x00\x00\x04" trak is used in the preview
+    # "\x00\x00\x08" trak size in not in pixel but in aspect ratio
+    tkhd.header.flags = b"\x00\x00\x03"
+    tkhd.track_id = track_id
+    tkhd.width = [512, 512]
+    tkhd.height = [512, 512]
+
+    # MOOV.TRAK.MDIA.MINF.STBL.STSD
+    stsd = trak.boxes[-1].boxes[-1].boxes[-1].boxes[0]
+    # pop _VC1
+    stsd.pop()
+
+    hvc1_bstr = ConstBitStream(bytes(hvc1))
+    hvc1 = next(Parser.parse(hvc1_bstr))
+    hvc1.load(hvc1_bstr)
+
+    # pop CLAP and PASP
+    hvc1.pop()
+    hvc1.pop()
+
+    stsd.append(hvc1)
+
+    return trak
+
+
 def index_metadata(args):
     args.container.close()
 
@@ -143,9 +176,9 @@ def index_metadata(args):
     del bstr
 
     # Parse samples mp4 boxes
-    samples_bstr = ConstBitStream(filename=container_filename, offset=mdat_data_offset * 8)
-    samples_boxes = _get_samples_boxes(samples_bstr)
-    del samples_bstr
+    with open(container_filename, "rb") as file:
+        file.seek(mdat_data_offset)
+        samples_headers = _get_samples_headers(file)
 
     # If the box content length is not set in the header
     if mdat.header.box_ext_size == mdat.header.header_size:
@@ -174,7 +207,8 @@ def index_metadata(args):
 
         # MOOV.MVHD
         mvhd = make_mvhd(creation_time, modification_time,
-                         len([box for box in samples_boxes if box.header.type == b"ftyp"]))
+                         len([header for header in samples_headers
+                              if header.type == b"ftyp"]))
         mvhd.next_track_id = 1
 
         moov.append(mvhd)
@@ -187,21 +221,21 @@ def index_metadata(args):
     if next(find_traks(moov.boxes, b"bzna_input\0"), None) is None:
         samples_offset = mdat_data_offset
         sample_size = -1
-        samples_sizes = []
+        sizes = []
 
-        for sample_box in samples_boxes:
+        for sample_header in samples_headers:
             # Every sample starts with a ftyp box
-            if sample_box.header.type == b"ftyp":
+            if sample_header.type == b"ftyp":
                 if sample_size >= 0:
-                    samples_sizes.append(sample_size)
+                    sizes.append(sample_size)
                 sample_size = 0
 
-            sample_size += sample_box.header.box_size
+            sample_size += sample_header.box_size
 
-        samples_sizes.append(sample_size)
+        sizes.append(sample_size)
 
         # MOOV.TRAK
-        trak = _make_bzna_input_trak(samples_sizes, samples_offset, mvhd.next_track_id)
+        trak = _make_bzna_input_trak(sizes, samples_offset, mvhd.next_track_id)
 
         moov.append(trak)
         mvhd.next_track_id += 1
@@ -214,28 +248,36 @@ def index_metadata(args):
     samples_trak = next(find_traks(moov.boxes, b"bzna_input\0"))
     # TRAK.MDIA.MINF.STBL
     stbl = samples_trak.boxes[-1].boxes[-1].boxes[-1]
-    samples_offsets = next(find_boxes(stbl.boxes, b"stco"))
+    samples_offsets = next(find_boxes(stbl.boxes, [b"stco", b"co64"]))
+    samples_sizes = next(find_boxes(stbl.boxes, b"stsz"))
 
     # bzna_target trak
     if next(find_traks(moov.boxes, b"bzna_target\0"), None) is None:
         samples_offset = container_len
         targets = []
-        samples_sizes = []
+        sizes = []
 
-        for sample_moov, sample_offset in zip(find_boxes(samples_boxes, b"moov"),
-                                              samples_offsets.entries):
-            sample_bstr = ConstBitStream(filename=container_filename,
-                                         offset=sample_offset.chunk_offset * 8)
-            target = get_trak_sample(sample_bstr, sample_moov.boxes, b"bzna_target\0", 0)
-            # Test subset reached
-            if target is None:
-                break
+        with open(container_filename, "rb") as file:
+            for offset, size in zip((o.chunk_offset for o in samples_offsets.entries),
+                                    (s.entry_size for s in samples_sizes.samples)):
+                file.seek(offset)
+                sample_bstr = ConstBitStream(file.read(size))
+                # Create a new tmp object to hold the content
+                sample_moov = next(find_boxes(Parser.parse(sample_bstr), b"moov"))
+                sample_moov.load(sample_bstr)
 
-            targets.append(target)
-            samples_sizes.append(len(target))
+                target = get_trak_sample_bytes(sample_bstr, sample_moov.boxes,
+                                               b"bzna_target\0", 0)
+                # Test subset is reached meaning that remaining entries will
+                # not contain a target
+                if target is None:
+                    break
+
+                targets.append(target)
+                sizes.append(len(target))
 
         # MOOV.TRAK
-        trak = _make_bzna_target_trak(samples_sizes, samples_offset, mvhd.next_track_id)
+        trak = _make_bzna_target_trak(sizes, samples_offset, mvhd.next_track_id)
 
         moov.append(trak)
         mvhd.next_track_id += 1
@@ -253,18 +295,25 @@ def index_metadata(args):
     if next(find_traks(moov.boxes, b"bzna_fname\0"), None) is None:
         samples_offset = container_len
         filenames = []
-        samples_sizes = []
+        sizes = []
 
-        for sample_moov, sample_offset in zip(find_boxes(samples_boxes, b"moov"),
-                                              samples_offsets.entries):
-            sample_bstr = ConstBitStream(filename=container_filename,
-                                         offset=sample_offset.chunk_offset * 8)
-            filename = get_trak_sample(sample_bstr, sample_moov.boxes, b"bzna_fname\0", 0)
-            filenames.append(filename)
-            samples_sizes.append(len(filename))
+        with open(container_filename, "rb") as file:
+            for offset, size in zip((o.chunk_offset for o in samples_offsets.entries),
+                                    (s.entry_size for s in samples_sizes.samples)):
+                file.seek(offset)
+                sample_bstr = ConstBitStream(file.read(size))
+                # Create a new tmp object to hold the content
+                sample_moov = next(find_boxes(Parser.parse(sample_bstr), b"moov"))
+                sample_moov.load(sample_bstr)
+
+                filename = get_trak_sample_bytes(sample_bstr, sample_moov.boxes,
+                                                 b"bzna_fname\0", 0)
+
+                filenames.append(filename)
+                sizes.append(len(filename))
 
         # MOOV.TRAK
-        trak = _make_bzna_fname_trak(samples_sizes, samples_offset, mvhd.next_track_id)
+        trak = _make_bzna_fname_trak(sizes, samples_offset, mvhd.next_track_id)
 
         moov.append(trak)
         mvhd.next_track_id += 1
@@ -277,6 +326,46 @@ def index_metadata(args):
             for filename in filenames:
                 container_file.write(filename)
                 container_len += len(filename)
+
+    # bzna_thumb trak
+    if next(find_traks(moov.boxes, b"bzna_thumb\0"), None) is None:
+        hvc1 = None
+        offsets = []
+        sizes = []
+
+        with open(container_filename, "rb") as file:
+            for offset, size in zip((o.chunk_offset for o in samples_offsets.entries),
+                                    (s.entry_size for s in samples_sizes.samples)):
+                file.seek(offset)
+                sample_bstr = ConstBitStream(file.read(size))
+                # Create a new tmp object to hold the content
+                sample_moov = next(find_boxes(Parser.parse(sample_bstr), b"moov"))
+                sample_moov.load(sample_bstr)
+
+                # MOOV.TRAK
+                trak = next(find_traks(sample_moov.boxes, b"bzna_thumb\0"))
+                # MOOV.TRAK.MDIA.MINF.STBL
+                stbl = trak.boxes[-1].boxes[-1].boxes[-1]
+                co = next(find_boxes(stbl.boxes, [b"stco", b"co64"]))
+                stsz = next(find_boxes(stbl.boxes, b"stsz"))
+
+                if hvc1 is None:
+                    # MOOV.TRAK.MDIA.MINF.STBL.STSD._VC1
+                    hvc1 = stbl.boxes[0].boxes[-1]
+
+                offsets.append(offset + co.entries[0].chunk_offset)
+                sizes.append(stsz.sample_size)
+
+        # MOOV.TRAK
+        trak = _make_bzna_thumb_trak(hvc1, sizes, offsets, mvhd.next_track_id)
+
+        moov.append(trak)
+        mvhd.next_track_id += 1
+
+        moov.refresh_box_size()
+
+        with open(moov_filename, "wb") as moov_file:
+            moov_file.write(bytes(moov))
 
     mdat.header.box_ext_size = container_len - mdat.header.start_pos
 

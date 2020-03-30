@@ -3,9 +3,9 @@ import shutil
 
 from bitstring import ConstBitStream
 
-from pybzparse import Parser, boxes as bx_def
+from pybenzinaparse import Parser, boxes as bx_def
 
-from pyheifconcat.create_container import create_container, parse_args
+from pybenzinaconcat.create_container import create_container, parse_args
 
 
 PWD = "tests_tmp"
@@ -63,5 +63,3 @@ def test_parse_args():
 
     finally:
         shutil.rmtree(".", ignore_errors=True)
-
-

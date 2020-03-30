@@ -6,9 +6,9 @@ import sys
 from bitstring import ConstBitStream
 from PIL import Image
 
-from pybzparse import Parser, boxes as bx_def
-from pybzparse.headers import BoxHeader
-from pybzparse.utils import make_meta_trak
+from pybenzinaparse import Parser, boxes as bx_def
+from pybenzinaparse.headers import BoxHeader
+from pybenzinaparse.utils import make_meta_trak
 
 CODECS_DICT = {"h264": ["-c:v", "libx264"],
                "h265": ["-c:v", "libx265", "-tag:v", "hvc1"]}
