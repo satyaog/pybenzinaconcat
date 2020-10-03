@@ -240,7 +240,7 @@ def i2m_frame_scale_and_pad(src, dest, src_width, src_height, codec, crf,
 
     ffmpeg_filter = ";".join(ffmpeg_filter)
 
-    subprocess.run(["ffmpeg", "-y", "-framerate", "1", "-i", src,
+    subprocess.run(["ffmpeg", "-nostdin", "-y", "-framerate", "1", "-i", src,
                     "-filter_complex", ffmpeg_filter] +
                    mapping + codec_settings + ["-f", "mp4", dest],
                    check=True)
@@ -406,8 +406,7 @@ def parse_args(raw_arguments=None):
 
     args, items_argv = parser.parse_known_args(argv)
 
-    tile_config_args = tile_config_parser.parse_args(args.tile.split(":"))
-    args.tile = tile_config_args
+    args.tile = tile_config_parser.parse_args(args.tile.split(":"))
 
     item_argv = []
 
