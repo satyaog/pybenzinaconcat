@@ -126,41 +126,58 @@ def _make_concat_dirs(root, ssh_remote=None):
 
 
 @TaskGenerator
-def _concat_files(filepaths, dest):
+def _concat_batch(batch, last_batch, dest):
     concatenated_files = []
 
+    if last_batch is not None:
+        last_concat_files, _ = last_batch
+        last_batch_file_idx = _get_file_index(last_concat_files[-1]) + 1
+    else:
+        last_batch_file_idx = 0
+
     with open(dest, "ab") as concat_file:
-        for filepath in filepaths:
-            # Concat files sequentially
-            filepath = identity(filepath)
-            # Another thread should not own the lock
-            if not filepath.lock():
-                break
+        for i, filepath in enumerate(batch):
+            # Concat filessequentially
+            assert _get_file_index(filepath) == last_batch_file_idx + i
+
+            # Concat file only once
+            task = identity("concat_files:" + filepath)
+
+            # No other thread should own the lock
+            if not task.lock():
+                raise RuntimeError("Could not obtain concat file task lock "
+                                   "for image [{}]. Task's hash is [{}]"
+                                   .format(filepath, task.hash()))
 
             try:
+                if task.is_failed():
+                    # Invalidate prior rerun
+                    task.invalidate()
+
                 # If filepath task has already executed, then the file has
                 # already been concatenated
-                if filepath.can_load():
+                if task.can_load():
                     LOGGER.warning("Ignoring [{}] since it has already been "
-                                   "concatenated".format(jug.value(filepath)))
+                                   "concatenated".format(filepath))
                     continue
 
-                filepath.run()
-                with open(jug.value(filepath), "rb") as f:
+                task.run()
+                with open(filepath, "rb") as f:
                     concat_file.write(f.read())
             except Exception:
-                filepath.invalidate()
+                task.fail()
                 raise
             finally:
-                filepath.unlock()
-            os.remove(jug.value(filepath))
-            concatenated_files.append(jug.value(filepath))
+                task.unlock()
 
-    _set = set(concatenated_files)
+            os.remove(filepath)
+            concatenated_files.append(filepath)
+
+    concatenated_set = set(concatenated_files)
     
     print("\n".join(concatenated_files))
     return concatenated_files, \
-           [f for f in filepaths if f not in _set]
+           [f for f in batch if f not in concatenated_set]
 
 
 def concat(src, dest, _action=None):
@@ -189,17 +206,11 @@ def concat(src, dest, _action=None):
     if dest_dir and not os.path.exists(dest_dir):
         os.makedirs(dest_dir)
 
-    result = []
+    result = [None]
     for batch in batches:
-        # Concat files sequentially. If a task is not ready, wait for its
-        # completion
-        if jug.is_jug_running():
-            while not batch.can_load() and not batch.is_failed():
-                sleep(60)
-            if not batch.can_load():
-                break
-        result.append(_concat_files(batch, dest))
-    return result
+        # Concat batches sequentially
+        result.append(_concat_batch(batch, result[-1], dest))
+    return result[1:]
 
 
 def to_bmp(input_path, dest_dir):
