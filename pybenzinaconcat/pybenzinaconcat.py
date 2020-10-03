@@ -11,6 +11,8 @@ import tarfile
 from collections import namedtuple
 from time import sleep
 
+from PIL import Image
+
 import jug
 from jug import TaskGenerator
 from jug.utils import identity
@@ -200,13 +202,21 @@ def concat(src, dest, _action=None):
     return result
 
 
+def to_bmp(input_path, dest_dir):
+    im = Image.open(input_path, 'r')
+    filename = os.path.basename(input_path)
+    filename = os.path.join(dest_dir, os.path.splitext(filename)[0] + ".BMP")
+    im.save(filename, "BMP")
+    return filename
+
+
 @TaskGenerator
-def transcode_img(input_path, dest_dir, mp4, ssh_remote=None, tmp=None):
+def transcode_img(input_path, dest_dir, clean_basename, mp4, ssh_remote=None,
+                  tmp=None):
     upload_dir, queue_dir = _get_dir_hierarchy(dest_dir)
     tmp_dir = tmp if tmp is not None else \
               os.path.dirname(input_path)
     filename = os.path.basename(input_path)
-    clean_filename = _get_clean_filepath(input_path, basename=True)
     target_path = _make_target_filepath(input_path)
 
     if tmp_dir and not os.path.exists(tmp_dir):
@@ -219,7 +229,7 @@ def transcode_img(input_path, dest_dir, mp4, ssh_remote=None, tmp=None):
                     "--output={dest} " \
                     "--primary --thumb --name={name} " \
                     "--item=path={src}" \
-                    .format(name=clean_filename,
+                    .format(name=clean_basename,
                             src=input_path, dest=output_path)
     if os.path.exists(target_path):
         cmd_arguments += " --hidden --name=target " \
@@ -236,7 +246,7 @@ def transcode_img(input_path, dest_dir, mp4, ssh_remote=None, tmp=None):
     except subprocess.CalledProcessError:
         LOGGER.error("Could not transcode file [{}] with target [{}] to [{}]"
                      .format(input_path, target_path, output_path))
-        return
+        return None
 
     uploaded_path = os.path.join(upload_dir, os.path.basename(output_path))
 
@@ -247,7 +257,7 @@ def transcode_img(input_path, dest_dir, mp4, ssh_remote=None, tmp=None):
     except subprocess.CalledProcessError:
         LOGGER.error("Could not move file [{}] to upload dir [{}]"
                      .format(output_path, upload_dir))
-        return
+        return None
 
     queued_path = os.path.join(queue_dir, os.path.basename(output_path))
     if ssh_remote:
@@ -258,11 +268,44 @@ def transcode_img(input_path, dest_dir, mp4, ssh_remote=None, tmp=None):
         except subprocess.CalledProcessError:
             LOGGER.error("Could not move file [{}] to queue dir [{}]"
                          .format(uploaded_path, queued_path))
-            return
+            return None
     else:
         os.rename(uploaded_path, queued_path)
 
     return queued_path
+
+
+def try_transcode_task(task, input_path):
+    # Unlock to retry the task
+    if task.is_failed():
+        task.unlock()
+
+    # No other thread should own the lock
+    if not task.lock():
+        raise RuntimeError("Could not obtain transcoding task lock for image "
+                           "[{}]. Task's hash is [{}]"
+                           .format(input_path, task.hash()))
+
+    try:
+        # If task has already executed, then the file has already been
+        # transcoded and queued
+        if task.can_load():
+            LOGGER.warning("Ignoring [{}] since it has already been transcoded"
+                           .format(input_path))
+            return not task.is_failed()
+
+        task.run()
+        if task.result is None:
+            task.fail()
+            task.invalidate()
+            return False
+        task.unlock()
+    except Exception:
+        task.fail()
+        task.invalidate()
+        raise
+
+    return not task.is_failed()
 
 
 @TaskGenerator
@@ -298,38 +341,44 @@ def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None,
         excluded_files = []
 
     transcoded_imgs = []
+    failed_imgs = []
     for input_path in source:
         clean_basename = _get_clean_filepath(input_path, basename=True)
         if clean_basename in excluded_files:
             LOGGER.info("Ignoring [{}] since [{}] is in [{}]"
                         .format(input_path, clean_basename, excludes.name))
             continue
-        # Transcode batch sequentially
-        transcoded_img = transcode_img(input_path, dest_dir, mp4, ssh_remote,
-                                       tmp)
-        # Another thread should not own the lock
-        if not transcoded_img.lock():
-            break
 
-        try:
-            # If transcoded_img task has already executed, then the file has
-            # already been transcoded and queued
-            if transcoded_img.can_load():
-                LOGGER.warning("Ignoring [{}] since it has already been "
-                               "transcoded and moved to {}:{}"
-                               .format(input_path, ssh_remote, dest_dir))
-                continue
-            transcoded_img.run()
-        except Exception:
-            transcoded_img.invalidate()
-            raise
-        finally:
-            transcoded_img.unlock()
+        # Transcode files sequentially and only once
+        task = transcode_img(input_path, dest_dir, clean_basename, mp4,
+                             ssh_remote=ssh_remote, tmp=tmp)
 
-        if jug.value(transcoded_img) is None:
-            transcoded_img.invalidate()
+        for i in range(2):
+            if try_transcode_task(task, input_path):
+                break
         else:
-            transcoded_imgs.append(jug.value(transcoded_img))
+            # Transcode to BMP prior to H.265 to work around ffmpeg errors
+            bmp_path = to_bmp(input_path, tmp)
+            LOGGER.warning("Extra transcode step on [{}]: BMP written at [{}]"
+                           .format(input_path, bmp_path))
+            task = transcode_img(bmp_path, dest_dir, clean_basename, mp4,
+                                 ssh_remote=ssh_remote, tmp=tmp)
+            try_transcode_task(task, input_path)
+
+        if task.is_failed():
+            failed_imgs.append(input_path)
+        else:
+            transcoded_imgs.append(jug.value(task))
+
+    if failed_imgs:
+        raise RuntimeError("Could not transcode all images [{}, ...]"
+                           .format(','.join(source[:2])))
+
+    # Raise when no images gets transcoded. Otherwise the task's results gets
+    # stored and returned in subsequent executions
+    if not transcoded_imgs:
+        raise RuntimeError("No image to transcode from [{}, ...]"
+                           .format(','.join(source[:2])))
 
     return transcoded_imgs
 
