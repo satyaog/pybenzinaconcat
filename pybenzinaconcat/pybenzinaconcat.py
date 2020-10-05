@@ -127,18 +127,20 @@ def _make_concat_dirs(root, ssh_remote=None):
 
 @TaskGenerator
 def _concat_batch(batch, last_batch, dest):
-    concatenated_files = []
-
     if last_batch is not None:
         last_concat_files, _ = last_batch
-        last_batch_file_idx = _get_file_index(last_concat_files[-1]) + 1
+        last_batch_file_idx = _get_file_index(last_concat_files[-1])
     else:
-        last_batch_file_idx = 0
+        last_batch_file_idx = -1
 
+    concatenated_files = []
     with open(dest, "ab") as concat_file:
         for i, filepath in enumerate(batch):
             # Concat filessequentially
-            assert _get_file_index(filepath) == last_batch_file_idx + i
+            file_index = _get_file_index(filepath)
+            if file_index is not None:
+                assert _get_file_index(filepath) > last_batch_file_idx
+                last_batch_file_idx = _get_file_index(filepath)
 
             # Concat file only once
             task = identity("concat_files:" + filepath)
@@ -180,7 +182,7 @@ def _concat_batch(batch, last_batch, dest):
            [f for f in batch if f not in concatenated_set]
 
 
-def concat(src, dest, _action=None):
+def concat(src, dest):
     """ Take a source directory containing files and append/concatenate them
     into a single destination file
 
@@ -190,8 +192,6 @@ def concat(src, dest, _action=None):
     If they don't exist, the subdirectories 'upload' and 'queue' of the source
     directory will be created
     """
-    del _action
-
     if isinstance(src, str):
         src_dir = src
         _, queue_dir = _make_concat_dirs(src_dir)
@@ -320,8 +320,7 @@ def try_transcode_task(task, input_path):
 
 
 @TaskGenerator
-def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None,
-              _action=None):
+def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
     """ Take a list of images and transcode them into a destination directory
 
     The suffix ".transcoded" will be appended to the file's base name
@@ -330,8 +329,6 @@ def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None,
     directory where 'upload' contains the files that are being uploaded and
     'queue' contains the files which are ready to be concatenated
     """
-    del _action
-
     dest_dir = dest
 
     if isinstance(src, str):
@@ -368,13 +365,16 @@ def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None,
             if try_transcode_task(task, input_path):
                 break
         else:
-            # Transcode to BMP prior to H.265 to work around ffmpeg errors
-            bmp_path = to_bmp(input_path, tmp)
-            LOGGER.warning("Extra transcode step on [{}]: BMP written at [{}]"
-                           .format(input_path, bmp_path))
-            task = transcode_img(bmp_path, dest_dir, clean_basename, mp4,
-                                 ssh_remote=ssh_remote, tmp=tmp)
-            try_transcode_task(task, input_path)
+            try:
+                # Transcode to BMP prior to H.265 to work around ffmpeg errors
+                bmp_path = to_bmp(input_path, tmp)
+                LOGGER.warning("Extra transcode step on [{}]: BMP written at [{}]"
+                               .format(input_path, bmp_path))
+                task = transcode_img(bmp_path, dest_dir, clean_basename, mp4,
+                                     ssh_remote=ssh_remote, tmp=tmp)
+                try_transcode_task(task, input_path)
+            except FileNotFoundError:
+                pass
 
         if task.is_failed():
             failed_imgs.append(input_path)
@@ -486,25 +486,23 @@ def extract_batch(archive_type, **kwargs):
         return extract_tar(**kwargs)
 
 
-def extract(_action=None, **kwargs):
+def extract(src, dest, archive_type, start=0, size=0, batch_size=0, tmp=None):
     """ Take a source archive file and extract images from it into a
     destination directory.
     """
-    del _action
+    kwargs = {**locals()}
 
-    if kwargs["size"] == 0:
-        kwargs["size"] = _get_archive_size(kwargs["src"],
-                                           kwargs["archive_type"])
+    if size == 0:
+        size = _get_archive_size(src, archive_type)
 
-    if kwargs["size"] and kwargs["batch_size"]:
-        kwargs["batch_size"] = min(kwargs["size"], kwargs["batch_size"])
+    if size and batch_size:
+        batch_size = min(size, batch_size)
         processes_kwargs = []
-        for start in range(kwargs["start"], kwargs["start"] + kwargs["size"],
-                           kwargs["batch_size"]):
+        for start in range(start, start + size, batch_size):
             process_kwargs = copy.deepcopy(kwargs)
             del process_kwargs["batch_size"]
             process_kwargs["start"] = start
-            process_kwargs["size"] = kwargs["batch_size"]
+            process_kwargs["size"] = batch_size
             processes_kwargs.append(process_kwargs)
     else:
         del kwargs["batch_size"]
@@ -513,7 +511,7 @@ def extract(_action=None, **kwargs):
     # Minimize async issues when trying to create the same directory multiple
     # times and at the same time
     tmp_dir = kwargs.get("tmp", None)
-    extract_dir = tmp_dir if tmp_dir is not None else kwargs["dest"]
+    extract_dir = tmp_dir if tmp_dir is not None else dest
     if extract_dir and not os.path.exists(extract_dir):
         os.makedirs(extract_dir)
 
@@ -642,8 +640,12 @@ def parse_args(argv=None):
     return args, argv
 
 
+def _trim_action_kwarg(*args, _action=None, **kwargs):
+    return ACTIONS.get(_action, None)(*args, **kwargs)
+
+
 def pybenzinaconcat(args, argv=None):
-    result_arr = ACTIONS.get(args._action, None)(**vars(args))
+    result_arr = _trim_action_kwarg(**vars(args))
 
     if isinstance(result_arr, jug.Task):
         result_arr = [result_arr]
@@ -659,8 +661,7 @@ def pybenzinaconcat(args, argv=None):
             args = [{**vars(args), "src": result_arr}]
         else:
             args = [vars(args)]
-        result_arr = [ACTIONS.get(_args["_action"], None)(**_args)
-                      for _args in args]
+        result_arr = [_trim_action_kwarg(**_args) for _args in args]
     
     return result_arr
 
