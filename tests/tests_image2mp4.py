@@ -259,7 +259,7 @@ def test_image2mp4():
         # MOOV.TRAK.MDIA.MINF.STBL.STCO
         offset = stbl.boxes[4].entries[0].chunk_offset - \
                  mdat.header.start_pos - mdat.header.header_size
-        assert mdat.data[offset:offset + size] == bytes(name, "utf-8")
+        assert mdat.data[offset:offset + size] == bytes(name, "utf-8") + b'\0'
 
         trak = moov.boxes[3]
         assert trak.boxes[-1].boxes[1].name == b"bzna_target\0"

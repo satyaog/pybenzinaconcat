@@ -325,7 +325,7 @@ def image2mp4(args):
             traks[:] = traks[0:1] + [target_trak] + traks[1:]
 
     filename_trak = make_filenames_trak(mdat, ftyp.header.box_size,
-                                        [bytes(src_item.name, "utf8")])
+                                        [bytes(src_item.name, "utf8") + b'\0'])
     traks[:] = traks[0:1] + [filename_trak] + traks[1:]
     clap_traks(traks, src_width, src_height, thumb_width, thumb_height)
 
