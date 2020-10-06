@@ -152,8 +152,7 @@ def test_concat_no_queue():
         assert os.path.exists(os.path.join(src_dir, "upload/"))
         assert os.path.exists(os.path.join(src_dir, "queue/"))
 
-        with open(args.dest, "rb") as file:
-            assert file.read() == b''
+        assert not os.path.exists(args.dest)
 
     finally:
         shutil.rmtree(".", ignore_errors=True)
@@ -564,6 +563,7 @@ def test_extract():
     dest_dir = os.path.dirname(dest)
 
     args, _ = parse_args(["extract", src, dest, "tar"])
+    del args._action
 
     try:
         extracted_filepaths = _run_tasks(extract(**vars(args)))[0]

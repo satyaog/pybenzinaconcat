@@ -125,6 +125,41 @@ def _make_concat_dirs(root, ssh_remote=None):
     return upload_dir, queue_dir
 
 
+def _concat_file(concat_f, filepath):
+    # Concat file only once
+    task = identity("concat_file:" + filepath)
+
+    # No other thread should own the lock
+    if not task.lock():
+        raise RuntimeError("Could not obtain concat file task lock "
+                           "for image [{}]. Task's hash is [{}]"
+                           .format(filepath, task.hash()))
+
+    try:
+        if task.is_failed():
+            # Invalidate prior rerun
+            task.invalidate()
+
+        # If filepath task has already executed, then the file has
+        # already been concatenated
+        if task.can_load():
+            LOGGER.warning("Ignoring [{}] since it has already been "
+                           "concatenated".format(filepath))
+            return None
+
+        task.run()
+        with open(filepath, "rb") as f:
+            concat_f.write(f.read())
+    except Exception:
+        task.fail()
+        raise
+    finally:
+        task.unlock()
+
+    os.remove(filepath)
+    return filepath
+
+
 @TaskGenerator
 def _concat_batch(batch, last_batch, dest):
     if last_batch is not None:
@@ -133,50 +168,36 @@ def _concat_batch(batch, last_batch, dest):
     else:
         last_batch_file_idx = -1
 
+    # "Lock" concat file using jug
+    task = identity("concat_file:" + dest)
+
+    # No other thread should own the lock
+    if not task.lock():
+        raise RuntimeError("Could not obtain concat file task lock for "
+                           "archive [{}]. Task's hash is [{}]"
+                           .format(dest, task.hash()))
+
     concatenated_files = []
-    with open(dest, "ab") as concat_file:
-        for i, filepath in enumerate(batch):
-            # Concat filessequentially
-            file_index = _get_file_index(filepath)
-            if file_index is not None:
-                assert _get_file_index(filepath) > last_batch_file_idx
-                last_batch_file_idx = _get_file_index(filepath)
 
-            # Concat file only once
-            task = identity("concat_files:" + filepath)
+    try:
+        with open(dest, "ab") as concat_f:
+            for i, filepath in enumerate(batch):
+                # Concat files sequentially
+                file_index = _get_file_index(filepath)
+                if file_index is not None:
+                    assert _get_file_index(filepath) > last_batch_file_idx
+                    last_batch_file_idx = _get_file_index(filepath)
 
-            # No other thread should own the lock
-            if not task.lock():
-                raise RuntimeError("Could not obtain concat file task lock "
-                                   "for image [{}]. Task's hash is [{}]"
-                                   .format(filepath, task.hash()))
+                if _concat_file(concat_f, filepath) is not None:
+                    concatenated_files.append(filepath)
 
-            try:
-                if task.is_failed():
-                    # Invalidate prior rerun
-                    task.invalidate()
-
-                # If filepath task has already executed, then the file has
-                # already been concatenated
-                if task.can_load():
-                    LOGGER.warning("Ignoring [{}] since it has already been "
-                                   "concatenated".format(filepath))
-                    continue
-
-                task.run()
-                with open(filepath, "rb") as f:
-                    concat_file.write(f.read())
-            except Exception:
-                task.fail()
-                raise
-            finally:
-                task.unlock()
-
-            os.remove(filepath)
-            concatenated_files.append(filepath)
+        if len(concatenated_files) == 0 and os.stat(dest).st_size == 0:
+            os.remove(dest)
+    finally:
+        task.unlock()
 
     concatenated_set = set(concatenated_files)
-    
+
     print("\n".join(concatenated_files))
     return concatenated_files, \
            [f for f in batch if f not in concatenated_set]
