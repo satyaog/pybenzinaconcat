@@ -1,11 +1,10 @@
-import ctypes
 import importlib.util
 import os
 import tarfile
 
 from jug import TaskGenerator
 
-from pybenzinaconcat.benzinaconcat import utils
+from pybenzinaconcat import utils
 from pybenzinaconcat.datasets import Dataset
 
 h5py_spec = importlib.util.find_spec("h5py")
@@ -16,31 +15,32 @@ if is_h5py_installed:
 
 
 class ImageNet(Dataset):
-    def __init__(self, src, type):
-        super().__init__(src)
-        self._type = type
+    SUPPORTED_FORMATS = ("hdf5", "tar")
 
-    @property
-    def type(self):
-        return self._type
-    
+    def __init__(self, src, ar_format):
+        super().__init__(src, ar_format)
+
+        if self._format == "hdf5":
+            with h5py.File(self._src, 'r') as f:
+                self._size = len(f["encoded_images"])
+        else:
+            # 1281167 train images
+            self._size = 1281167
+
     @property
     def size(self):
-        if self._type == "hdf5":
-            with h5py.File(self._src, "r") as file_h5:
-                return len(file_h5["encoded_images"])
+        return self._size
+    
+    @staticmethod
+    @TaskGenerator
+    def extract(dataset, dest, start=0, size=512):
+        if dataset.format == "hdf5":
+            return extract_hdf5(dataset, dest, start, size)
         else:
-            return 0
-
-    def extract(self, dest, start=0, size=512):
-        if self._type == "hdf5":
-            return extract_hdf5(self._src, dest, start, size)
-        else:
-            return extract_tar(self._src, dest, start, size)
+            return extract_tar(dataset, dest, start, size)
 
 
-@TaskGenerator
-def extract_hdf5(src, dest, start, size):
+def extract_hdf5(dataset, dest, start, size):
     """ Take a source HDF5 file and extract images from it into a destination
     directory
     """
@@ -48,38 +48,36 @@ def extract_hdf5(src, dest, start, size):
 
     extracted_filenames = []
 
-    with h5py.File(src, "r") as file_h5:
-        num_elements = len(file_h5["encoded_images"])
-        num_targets = len(file_h5["targets"])
+    with h5py.File(dataset.src, 'r') as h5_f:
+        num_elements = len(h5_f["encoded_images"])
+        num_targets = len(h5_f["targets"])
 
         start = start
         end = min(start + size, num_elements) if size else num_elements
 
         for i in range(start, end):
-            filename = file_h5["filenames"][i][0].decode("utf-8")
-            filename = utils._make_index_filepath(filename, i)
+            filename = h5_f["filenames"][i][0].decode("utf-8")
             extract_filepath = os.path.join(extract_dir, filename)
+            extract_filepath = utils._make_index_filepath(extract_filepath, i)
             target_filepath = utils._make_target_filepath(extract_filepath)
 
-            extracted_filenames.append(extract_filepath)
-
             if not os.path.exists(extract_filepath):
-                img = bytes(file_h5["encoded_images"][i])
+                with open(os.path.join(extract_dir, filename), "wb") as f:
+                    f.write(bytes(h5_f["encoded_images"][i]))
+                os.rename(os.path.join(extract_dir, filename),
+                          extract_filepath)
 
-                with open(extract_filepath, "xb") as file:
-                    file.write(img)
+            if i < num_targets:
+                target = h5_f["targets"][i].astype(np.int64).tobytes()
+                with open(target_filepath, "wb") as f:
+                    f.write(target)                                     
 
-            if not os.path.exists(target_filepath) and i < num_targets:
-                target = file_h5["targets"][i].astype(np.int64).tobytes()
-
-                with open(target_filepath, "xb") as file:
-                    file.write(target)
+            extracted_filenames.append(extract_filepath)
 
     return extracted_filenames
 
 
-@TaskGenerator
-def extract_tar(src, dest, start, size):
+def extract_tar(dataset, dest, start, size):
     """ Take a source tar file and extract images from it into a destination
     directory
     """
@@ -88,13 +86,13 @@ def extract_tar(src, dest, start, size):
     extracted_filenames = []
 
     index = 0
-    end = start + size if size else ctypes.c_ulonglong(-1).value
+    end = min(start + size, dataset.size) if size else dataset.size
 
-    with tarfile.open(src, "r") as file_tar:
-        for target_idx, member in enumerate(file_tar):
+    with tarfile.open(dataset.src, 'r') as tar_f:
+        for target_idx, member in enumerate(tar_f):
             if index >= end:
                 break
-            sub_tar = file_tar.extractfile(member)
+            sub_tar = tar_f.extractfile(member)
             file_sub_tar = tarfile.open(fileobj=sub_tar, mode="r")
             for sub_member in file_sub_tar:
                 if index >= end:
@@ -106,18 +104,16 @@ def extract_tar(src, dest, start, size):
                     extract_filepath = os.path.join(extract_dir, filename)
                     target_filepath = utils._make_target_filepath(extract_filepath)
 
-                    extracted_filenames.append(extract_filepath)
-
                     if not os.path.exists(extract_filepath):
                         file_sub_tar.extract(sub_member, extract_dir)
                         os.rename(os.path.join(extract_dir, sub_member.name),
                                   extract_filepath)
 
-                    if not os.path.exists(target_filepath):
-                        target = target_idx.to_bytes(8, byteorder="little")
+                    target = target_idx.to_bytes(8, "little")
+                    with open(target_filepath, "wb") as f:
+                        f.write(target)                                     
 
-                        with open(target_filepath, "xb") as file:
-                            file.write(target)
+                    extracted_filenames.append(extract_filepath)
 
                 index += 1
 

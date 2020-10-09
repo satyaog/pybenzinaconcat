@@ -57,8 +57,8 @@ def _create_container():
     if queue_dir and not os.path.exists(queue_dir):
         os.makedirs(queue_dir)
 
-    extract_args = ["extract", src, extract_dest, "tar", "--start", "5",
-                    "--size", "10", "--batch-size", "5"]
+    extract_args = ["extract", src, extract_dest, "imagenet:tar",
+                    "--start", "5", "--size", "10", "--batch-size", "5"]
     transcode_args = ["--transcode", transcode_dest, "--mp4",
                       "--tmp", transcode_tmp]
 

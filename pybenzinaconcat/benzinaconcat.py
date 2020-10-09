@@ -9,12 +9,12 @@ import sys
 from collections import namedtuple
 
 import jug
+import jug.utils
 from jug import TaskGenerator
-from jug.utils import identity
 from PIL import Image
 
+import pybenzinaconcat.datasets as datasets
 from pybenzinaconcat import utils
-from pybenzinaconcat.datasets import ImageNet
 
 h5py_spec = importlib.util.find_spec("h5py")
 is_h5py_installed = h5py_spec is not None
@@ -57,7 +57,7 @@ def _make_concat_dirs(root, ssh_remote=None):
 
 def _concat_file(concat_f, filepath):
     # Concat file only once
-    task = identity("concat_file:" + filepath)
+    task = jug.utils.identity("concat_file:" + filepath)
 
     # No other thread should own the lock
     if not task.lock():
@@ -98,7 +98,7 @@ def _concat_batch(batch, last_batch, dest):
             last_batch_file_idx = utils._get_file_index(last_concat_files[-1])
 
     # "Lock" concat file using jug
-    task = identity("concat_file:" + dest)
+    task = jug.utils.identity("concat_file:" + dest)
 
     # No other thread should own the lock
     if not task.lock():
@@ -147,7 +147,7 @@ def concat(src, dest):
         _, queue_dir = _make_concat_dirs(src_dir)
         queued_files = glob.glob(os.path.join(queue_dir, '*'))
         queued_files.sort()
-        batches = [identity(queued_files)]
+        batches = [jug.utils.identity(queued_files)]
     else:
         batches = src
 
@@ -352,20 +352,23 @@ def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
     else:
         exclude_files = []
 
-    source = identity(source)
-    exclude_files = identity(exclude_files)
+    source = jug.utils.identity(source)
+    exclude_files = jug.utils.identity(exclude_files)
     return transcode_batch(source, dest, exclude_files, mp4, ssh_remote, tmp)
 
 
-def extract(src, dest, archive_type, start=0, size=0, batch_size=0):
+def extract(src, dest, dataset_id, dataset_format, start=0, size=0,
+            batch_size=0):
     """ Take a source archive file and extract images from it into a
     destination directory.
     """
     kwargs = {**locals()}
     del kwargs["src"]
-    del kwargs["archive_type"]
+    del kwargs["dataset_id"]
+    del kwargs["dataset_format"]
 
-    dataset = ImageNet(src, archive_type)
+    dataset_cls = datasets.get_cls(dataset_id)
+    dataset = dataset_cls(src, dataset_format)
 
     if size == 0:
         size = dataset.size
@@ -388,7 +391,8 @@ def extract(src, dest, archive_type, start=0, size=0, batch_size=0):
     if dest and not os.path.exists(dest):
         os.makedirs(dest, exist_ok=True)
 
-    return [dataset.extract(**kwargs) for kwargs in processes_kwargs]
+    dataset = jug.utils.identity(dataset)
+    return [dataset_cls.extract(dataset, **kwargs) for kwargs in processes_kwargs]
 
 
 FileDesc = namedtuple("FileDesc", ["name", "mode"])
@@ -400,11 +404,26 @@ class ChainAction(argparse.Action):
         setattr(namespace, self.dest, [action] + values)
 
 
+class DatasetAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        dataset_id, ar_format = values.split(':')
+        dest = self.dest.lstrip('_')
+        setattr(namespace, dest + "_id", dataset_id)
+        setattr(namespace, dest + "_format", ar_format)
+        delattr(namespace, self.dest) 
+
+
 class CheckFileType(argparse.FileType):
     def __call__(self, string):
         f = super(CheckFileType, self).__call__(string)
         f.close()
         return FileDesc(f.name, f.mode)
+
+
+def _map_datasets_formats():
+    for label in datasets.ids:
+        for ar_format in datasets.get_cls(label).supported_formats():
+            yield "{}:{}".format(label, ar_format)
 
 
 def build_base_parser():
@@ -472,10 +491,8 @@ def build_extract_parser():
                         help="archive file to extract the images from")
     parser.add_argument("dest", metavar="destination",
                         help="directory to write the extracted file(s)")
-    parser.add_argument("archive_type",
-                        choices=["hdf5", "tar"] if is_h5py_installed
-                        else ["tar"],
-                        help="type of the archive")
+    parser.add_argument("_dataset", choices=list(_map_datasets_formats()),
+                        action=DatasetAction, help="dataset id and format")
     parser.add_argument("--start", metavar="IDX", default=0, type=int,
                         help="the start element index to transcode from "
                              "source")
