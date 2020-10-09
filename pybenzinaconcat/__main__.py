@@ -1,7 +1,7 @@
 from jug import is_jug_running
 
 if is_jug_running():
-    from pybenzinaconcat.pybenzinaconcat import main
+    from pybenzinaconcat.benzinaconcat import main
     main()
 else:
     import argparse

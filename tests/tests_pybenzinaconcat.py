@@ -7,10 +7,11 @@ import jug
 from jug.task import recursive_dependencies
 from jug.tests.task_reset import task_reset
 
-from pybenzinaconcat.pybenzinaconcat import FILENAME_TEMPLATE, _get_file_index, \
-    _get_clean_filepath, _is_transcoded, \
-    _make_index_filepath, _make_transcoded_filepath, \
-    concat, extract, transcode, parse_args, main
+from pybenzinaconcat.utils import FILENAME_TEMPLATE, _get_file_index, \
+    _get_clean_filepath, _is_transcoded, _make_index_filepath, \
+    _make_transcoded_filepath
+from pybenzinaconcat.benzinaconcat import concat, extract, transcode, \
+    parse_args, main
 
 TESTS_WORKING_DIR = os.path.dirname(__file__)
 DATA_DIR = os.path.join(TESTS_WORKING_DIR, "test_datasets")
@@ -546,7 +547,7 @@ def test_python_trancode():
         files_bytes = _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir)
         targets_bytes = [b'' for _ in range(len(tmp_filepaths))]
 
-        subprocess.run(["python", "../../pybenzinaconcat"] + args, check=True)
+        subprocess.run(["python3", "../../pybenzinaconcat"] + args, check=True)
 
         _test_trancode(tmp_filepaths, dest_dir, files_bytes, targets_bytes)
 
@@ -1131,7 +1132,7 @@ def test_python_extract_batch_size_chain_transcode_mp4():
         if queue_dir and not os.path.exists(queue_dir):
             os.makedirs(queue_dir)
 
-        processes = [subprocess.Popen(["python", "../../pybenzinaconcat"] +
+        processes = [subprocess.Popen(["python3", "../../pybenzinaconcat"] +
                                       args) for _ in range(4)]
 
         for p in processes:
@@ -1223,7 +1224,7 @@ def test_python_extract_batch_size_chain_transcode_chain_concat():
         if queue_dir and not os.path.exists(queue_dir):
             os.makedirs(queue_dir)
 
-        processes = [subprocess.Popen(["python", "../../pybenzinaconcat"] +
+        processes = [subprocess.Popen(["python3", "../../pybenzinaconcat"] +
                                       args) for _ in range(6)]
 
         for p in processes:

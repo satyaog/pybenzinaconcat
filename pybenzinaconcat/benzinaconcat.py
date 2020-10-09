@@ -1,27 +1,23 @@
 import argparse
 import copy
-import ctypes
 import glob
 import importlib.util
 import logging
 import os
 import subprocess
 import sys
-import tarfile
 from collections import namedtuple
-from time import sleep
-
-from PIL import Image
 
 import jug
 from jug import TaskGenerator
 from jug.utils import identity
+from PIL import Image
+
+from pybenzinaconcat import utils
+from pybenzinaconcat.datasets import ImageNet
 
 h5py_spec = importlib.util.find_spec("h5py")
 is_h5py_installed = h5py_spec is not None
-if is_h5py_installed:
-    import h5py
-    import numpy as np
 
 LOGGER = logging.getLogger(os.path.basename(__file__))
 LOGGER.setLevel(logging.INFO)
@@ -31,72 +27,6 @@ STREAM_HANDLER.setLevel(logging.INFO)
 FORMATTER = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 STREAM_HANDLER.setFormatter(FORMATTER)
 LOGGER.addHandler(STREAM_HANDLER)
-
-ID_FILENAME_TEMPLATE = "{index:012d}.{filename}"
-FILENAME_TEMPLATE = ID_FILENAME_TEMPLATE + ".transcoded"
-
-
-def _is_transcoded(filename):
-    return filename.split('.')[-1] == "transcoded"
-
-
-def _get_file_index(filepath):
-    if isinstance(filepath, str):
-        splitted_filename = os.path.basename(filepath).split('.')
-    else:
-        splitted_filename = filepath
-    if len(splitted_filename[0]) == 12 and splitted_filename[0].isdigit():
-        return int(splitted_filename[0])
-    return None
-
-
-def _get_clean_filepath(filepath, basename=False):
-    if isinstance(filepath, str):
-        dirname = os.path.dirname(filepath)
-        splitted_filename = os.path.basename(filepath).split('.')
-    else:
-        dirname = None
-        splitted_filename = filepath
-    if splitted_filename[-1] == "transcoded":
-        splitted_filename.pop()
-    if _get_file_index(splitted_filename) is not None:
-        splitted_filename.pop(0)
-    return '.'.join(splitted_filename) if basename else \
-           os.path.join(dirname, '.'.join(splitted_filename))
-
-
-def _make_index_filepath(filepath, index):
-    dirname = os.path.dirname(filepath)
-    filename = os.path.basename(filepath)
-    return os.path.join(dirname, ID_FILENAME_TEMPLATE.format(filename=filename,
-                                                             index=index))
-
-
-def _make_target_filepath(filepath):
-    dirname = os.path.dirname(filepath)
-    filename = os.path.basename(filepath)
-    return os.path.join(dirname, filename + ".target")
-
-
-def _make_transcoded_filepath(filepath):
-    dirname = os.path.dirname(filepath)
-    filename = os.path.basename(filepath)
-    return os.path.join(dirname, filename + ".transcoded")
-
-
-def _get_remote_path(ssh_remote, path):
-    if ssh_remote:
-        return ':'.join([ssh_remote, path])
-    else:
-        return path
-
-
-def _get_archive_size(archive, archive_type):
-    if archive_type == "hdf5":
-        with h5py.File(archive, "r") as file_h5:
-            return len(file_h5["encoded_images"])
-    else:
-        return 0
 
 
 def _get_dir_hierarchy(root):
@@ -165,7 +95,7 @@ def _concat_batch(batch, last_batch, dest):
     if last_batch is not None:
         last_concat_files, _ = last_batch
         if last_concat_files:
-            last_batch_file_idx = _get_file_index(last_concat_files[-1])
+            last_batch_file_idx = utils._get_file_index(last_concat_files[-1])
 
     # "Lock" concat file using jug
     task = identity("concat_file:" + dest)
@@ -182,10 +112,10 @@ def _concat_batch(batch, last_batch, dest):
         with open(dest, "ab") as concat_f:
             for i, filepath in enumerate(batch):
                 # Concat files sequentially
-                file_index = _get_file_index(filepath)
+                file_index = utils._get_file_index(filepath)
                 if file_index is not None:
-                    assert _get_file_index(filepath) > last_batch_file_idx
-                    last_batch_file_idx = _get_file_index(filepath)
+                    assert utils._get_file_index(filepath) > last_batch_file_idx
+                    last_batch_file_idx = utils._get_file_index(filepath)
 
                 if _concat_file(concat_f, filepath) is not None:
                     concatenated_files.append(filepath)
@@ -237,11 +167,11 @@ def to_bmp(input_path, dest_dir):
     im = Image.open(input_path, 'r')
     filename = os.path.basename(input_path)
     filename = os.path.join(dest_dir, os.path.splitext(filename)[0] + ".BMP")
-    target_path = _make_target_filepath(input_path)
+    target_path = utils._make_target_filepath(input_path)
     if os.path.isfile(target_path):
         with open(target_path, "rb") as f:
             target = f.read()
-        target_filename = _make_target_filepath(filename)
+        target_filename = utils._make_target_filepath(filename)
         with open(target_filename, "wb") as f:
             f.write(target)
     im.save(filename, "BMP")
@@ -255,12 +185,12 @@ def transcode_img(input_path, dest_dir, clean_basename, mp4, ssh_remote=None,
     tmp_dir = tmp if tmp is not None else \
               os.path.dirname(input_path)
     filename = os.path.basename(input_path)
-    target_path = _make_target_filepath(input_path)
+    target_path = utils._make_target_filepath(input_path)
 
     if tmp_dir and not os.path.exists(tmp_dir):
         os.makedirs(tmp_dir)
 
-    output_path = _make_transcoded_filepath(os.path.join(tmp_dir, filename))
+    output_path = utils._make_transcoded_filepath(os.path.join(tmp_dir, filename))
     command = ["python", "-m", "pybenzinaconcat.image2mp4"] \
               if mp4 else ["image2heif"]
     cmd_arguments = " --codec=h265 --tile=512:512:yuv420 --crf=10 " \
@@ -290,7 +220,7 @@ def transcode_img(input_path, dest_dir, clean_basename, mp4, ssh_remote=None,
 
     try:
         subprocess.run(["rsync", "-v", "--remove-source-files", output_path,
-                        _get_remote_path(ssh_remote, upload_dir)],
+                        utils._get_remote_path(ssh_remote, upload_dir)],
                        check=True)
     except subprocess.CalledProcessError:
         LOGGER.error("Could not move file [{}] to upload dir [{}]"
@@ -356,7 +286,7 @@ def transcode_batch(src, dest, exclude_files=tuple(), mp4=True,
     transcoded_imgs = []
     failed_imgs = []
     for input_path in src:
-        clean_basename = _get_clean_filepath(input_path, basename=True)
+        clean_basename = utils._get_clean_filepath(input_path, basename=True)
         if clean_basename in exclude_files:
             LOGGER.info("Ignoring [{}] since [{}] is excluded"
                         .format(input_path, clean_basename))
@@ -416,7 +346,8 @@ def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
             exclude_files = f.read().split('\n')
 
         for i, exclude in enumerate(exclude_files):
-            exclude_files[i] = _get_clean_filepath(exclude, basename=True)
+            exclude_files[i] = utils._get_clean_filepath(exclude,
+                                                         basename=True)
         exclude_files.sort()
     else:
         exclude_files = []
@@ -426,106 +357,18 @@ def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
     return transcode_batch(source, dest, exclude_files, mp4, ssh_remote, tmp)
 
 
-@TaskGenerator
-def extract_hdf5(src, dest, start, size, tmp=None):
-    """ Take a source HDF5 file and extract images from it into a destination
-    directory
-    """
-    extract_dir = tmp if tmp is not None else dest
-
-    extracted_filenames = []
-
-    with h5py.File(src, "r") as file_h5:
-        num_elements = len(file_h5["encoded_images"])
-        num_targets = len(file_h5["targets"])
-
-        start = start
-        end = min(start + size, num_elements) if size else num_elements
-
-        for i in range(start, end):
-            filename = file_h5["filenames"][i][0].decode("utf-8")
-            filename = _make_index_filepath(filename, i)
-            extract_filepath = os.path.join(extract_dir, filename)
-            target_filepath = _make_target_filepath(extract_filepath)
-
-            extracted_filenames.append(extract_filepath)
-
-            if not os.path.exists(extract_filepath):
-                img = bytes(file_h5["encoded_images"][i])
-
-                with open(extract_filepath, "xb") as file:
-                    file.write(img)
-
-            if not os.path.exists(target_filepath) and i < num_targets:
-                target = file_h5["targets"][i].astype(np.int64).tobytes()
-
-                with open(target_filepath, "xb") as file:
-                    file.write(target)
-
-    return extracted_filenames
-
-
-@TaskGenerator
-def extract_tar(src, dest, start, size, tmp=None):
-    """ Take a source tar file and extract images from it into a destination
-    directory
-    """
-    extract_dir = tmp if tmp is not None else dest
-
-    extracted_filenames = []
-
-    index = 0
-    end = start + size if size else ctypes.c_ulonglong(-1).value
-
-    with tarfile.open(src, "r") as file_tar:
-        for target_idx, member in enumerate(file_tar):
-            if index >= end:
-                break
-            sub_tar = file_tar.extractfile(member)
-            file_sub_tar = tarfile.open(fileobj=sub_tar, mode="r")
-            for sub_member in file_sub_tar:
-                if index >= end:
-                    break
-
-                if index >= start:
-                    filename = sub_member.name
-                    filename = _make_index_filepath(filename, index)
-                    extract_filepath = os.path.join(extract_dir, filename)
-                    target_filepath = _make_target_filepath(extract_filepath)
-
-                    extracted_filenames.append(extract_filepath)
-
-                    if not os.path.exists(extract_filepath):
-                        file_sub_tar.extract(sub_member, extract_dir)
-                        os.rename(os.path.join(extract_dir, sub_member.name),
-                                  extract_filepath)
-
-                    if not os.path.exists(target_filepath):
-                        target = target_idx.to_bytes(8, byteorder="little")
-
-                        with open(target_filepath, "xb") as file:
-                            file.write(target)
-
-                index += 1
-
-    return extracted_filenames
-
-
-def extract_batch(archive_type, **kwargs):
-    if archive_type == "hdf5":
-        return extract_hdf5(**kwargs)
-    else:
-        return extract_tar(**kwargs)
-
-
-def extract(src, dest, archive_type, start=0, size=0, batch_size=0, tmp=None):
+def extract(src, dest, archive_type, start=0, size=0, batch_size=0):
     """ Take a source archive file and extract images from it into a
     destination directory.
     """
     kwargs = {**locals()}
+    del kwargs["src"]
+    del kwargs["archive_type"]
+
+    dataset = ImageNet(src, archive_type)
 
     if size == 0:
-        size = _get_archive_size(src, archive_type)
+        size = dataset.size
 
     if size and batch_size:
         batch_size = min(size, batch_size)
@@ -542,12 +385,10 @@ def extract(src, dest, archive_type, start=0, size=0, batch_size=0, tmp=None):
 
     # Minimize async issues when trying to create the same directory multiple
     # times and at the same time
-    tmp_dir = kwargs.get("tmp", None)
-    extract_dir = tmp_dir if tmp_dir is not None else dest
-    if extract_dir and not os.path.exists(extract_dir):
-        os.makedirs(extract_dir)
+    if dest and not os.path.exists(dest):
+        os.makedirs(dest, exist_ok=True)
 
-    return [extract_batch(**kwargs) for kwargs in processes_kwargs]
+    return [dataset.extract(**kwargs) for kwargs in processes_kwargs]
 
 
 FileDesc = namedtuple("FileDesc", ["name", "mode"])
@@ -578,8 +419,8 @@ def build_base_parser():
 
 
 def build_concat_parser():
-    parser = argparse.ArgumentParser(description="Benzina HEIF Concatenation action: "
-                                                 "concat",
+    parser = argparse.ArgumentParser(description="Benzina HEIF Concatenation "
+                                                 "action: concat",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("_action", metavar="concat", help="action to execute")
     parser.add_argument("src", metavar="source",
@@ -592,8 +433,8 @@ def build_concat_parser():
 
 
 def build_transcode_parser():
-    parser = argparse.ArgumentParser(description="Benzina HEIF Concatenation action: "
-                                                 "transcode",
+    parser = argparse.ArgumentParser(description="Benzina HEIF Concatenation "
+                                                 "action: transcode",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("_action", metavar="transcode",
                         help="action to execute")
@@ -622,8 +463,8 @@ def build_transcode_parser():
 
 
 def build_extract_parser():
-    parser = argparse.ArgumentParser(description="Benzina HEIF Concatenation action: "
-                                                 "extract",
+    parser = argparse.ArgumentParser(description="Benzina HEIF Concatenation "
+                                                 "action: extract",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     parser.add_argument("_action", metavar="extract", help="action to execute")
