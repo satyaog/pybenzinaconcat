@@ -29,8 +29,7 @@ os.chdir(PWD)
 
 def _run_tasks(tasks) -> list:
     for task in tasks:
-        for subtask in recursive_dependencies(task):
-            subtask.run()
+        _run_tasks(recursive_dependencies(task))
         task.run()
     return jug.value(tasks)
 

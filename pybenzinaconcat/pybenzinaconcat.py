@@ -341,45 +341,21 @@ def try_transcode_task(task, input_path):
 
 
 @TaskGenerator
-def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
-    """ Take a list of images and transcode them into a destination directory
-
-    The suffix ".transcoded" will be appended to the file's base name
-
-    Subdirectories 'upload' and 'queue' will be created in destination
-    directory where 'upload' contains the files that are being uploaded and
-    'queue' contains the files which are ready to be concatenated
-    """
-    dest_dir = dest
-
-    if isinstance(src, str):
-        source = src.split(',')
-        if len(source) == 1 and os.path.basename(source[0]) == "list":
-            with open(source[0], 'r') as files_list:
-                source = files_list.read().split('\n')
-    else:
-        source = src
-
-    if excludes is not None:
-        with open(excludes.name, excludes.mode) as f:
-            excluded_files = f.read().split('\n')
-
-        for i, exclude in enumerate(excluded_files):
-            excluded_files[i] = _get_clean_filepath(exclude, basename=True)
-    else:
-        excluded_files = []
+def transcode_batch(src, dest, exclude_files=tuple(), mp4=True,
+                    ssh_remote=None, tmp=None):
+    exclude_files = set(exclude_files)
 
     transcoded_imgs = []
     failed_imgs = []
-    for input_path in source:
+    for input_path in src:
         clean_basename = _get_clean_filepath(input_path, basename=True)
-        if clean_basename in excluded_files:
-            LOGGER.info("Ignoring [{}] since [{}] is in [{}]"
-                        .format(input_path, clean_basename, excludes.name))
+        if clean_basename in exclude_files:
+            LOGGER.info("Ignoring [{}] since [{}] is excluded"
+                        .format(input_path, clean_basename))
             continue
 
         # Transcode files sequentially and only once
-        task = transcode_img(input_path, dest_dir, clean_basename, mp4,
+        task = transcode_img(input_path, dest, clean_basename, mp4,
                              ssh_remote=ssh_remote, tmp=tmp)
 
         for i in range(2):
@@ -389,9 +365,9 @@ def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
             try:
                 # Transcode to BMP prior to H.265 to work around ffmpeg errors
                 bmp_path = to_bmp(input_path, tmp)
-                LOGGER.warning("Extra transcode step on [{}]: BMP written at [{}]"
-                               .format(input_path, bmp_path))
-                task = transcode_img(bmp_path, dest_dir, clean_basename, mp4,
+                LOGGER.warning("Extra transcode step on [{}]: BMP written at "
+                               "[{}]".format(input_path, bmp_path))
+                task = transcode_img(bmp_path, dest, clean_basename, mp4,
                                      ssh_remote=ssh_remote, tmp=tmp)
                 try_transcode_task(task, input_path)
             except FileNotFoundError:
@@ -403,16 +379,43 @@ def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
             transcoded_imgs.append(jug.value(task))
 
     if failed_imgs:
-        raise RuntimeError("Could not transcode all images [{}, ...]"
-                           .format(','.join(source[:2])))
-
-    # Raise when no images gets transcoded. Otherwise the task's results gets
-    # stored and returned in subsequent executions
-    if not transcoded_imgs:
-        raise RuntimeError("No image to transcode from [{}, ...]"
-                           .format(','.join(source[:2])))
+        raise RuntimeError("Could not transcode all images [{}]"
+                           .format(','.join(src[:2] + ["..."] + src[-1:])))
 
     return transcoded_imgs
+
+
+def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
+    """ Take a list of images and transcode them into a destination directory
+
+    The suffix ".transcoded" will be appended to the file's base name
+
+    Subdirectories 'upload' and 'queue' will be created in destination
+    directory where 'upload' contains the files that are being uploaded and
+    'queue' contains the files which are ready to be concatenated
+    """
+    if isinstance(src, str):
+        source = src.split(',')
+        if len(source) == 1 and os.path.basename(source[0]) == "list":
+            with open(source[0], 'r') as files_list:
+                source = files_list.read().split('\n')
+        source.sort()
+    else:
+        source = src
+
+    if excludes is not None:
+        with open(excludes.name, excludes.mode) as f:
+            exclude_files = f.read().split('\n')
+
+        for i, exclude in enumerate(exclude_files):
+            exclude_files[i] = _get_clean_filepath(exclude, basename=True)
+        exclude_files.sort()
+    else:
+        exclude_files = []
+
+    source = identity(source)
+    exclude_files = identity(exclude_files)
+    return transcode_batch(source, dest, exclude_files, mp4, ssh_remote, tmp)
 
 
 @TaskGenerator
