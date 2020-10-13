@@ -7,10 +7,9 @@ import jug
 from jug.task import recursive_dependencies
 from jug.tests.task_reset import task_reset
 
-
 from pybenzinaconcat.pybenzinaconcat import FILENAME_TEMPLATE, _get_file_index, \
     _get_clean_filepath, _is_transcoded, \
-    _make_index_filepath, _make_transcoded_filepath, _trim_action_kwarg, \
+    _make_index_filepath, _make_transcoded_filepath, \
     concat, extract, transcode, parse_args, pybenzinaconcat
 
 TESTS_WORKING_DIR = os.path.dirname(__file__)

@@ -162,11 +162,12 @@ def _concat_file(concat_f, filepath):
 
 @TaskGenerator
 def _concat_batch(batch, last_batch, dest):
+    last_batch_file_idx = -1
+
     if last_batch is not None:
         last_concat_files, _ = last_batch
-        last_batch_file_idx = _get_file_index(last_concat_files[-1])
-    else:
-        last_batch_file_idx = -1
+        if last_concat_files:
+            last_batch_file_idx = _get_file_index(last_concat_files[-1])
 
     # "Lock" concat file using jug
     task = identity("concat_file:" + dest)
@@ -628,7 +629,8 @@ def build_extract_parser():
                         else ["tar"],
                         help="type of the archive")
     parser.add_argument("--start", metavar="IDX", default=0, type=int,
-                        help="the start element index to transcode from source")
+                        help="the start element index to transcode from "
+                             "source")
     parser.add_argument("--size", default=0, metavar="NUM", type=int,
                         help="the number of elements to extract from source")
     parser.add_argument("--batch-size", default=512, metavar="NUM", type=int,
@@ -664,12 +666,12 @@ def parse_args(argv=None):
     return args, argv
 
 
-def _trim_action_kwarg(*args, _action=None, **kwargs):
-    return ACTIONS.get(_action, None)(*args, **kwargs)
+def _run_action(_action=None, **kwargs):
+    return ACTIONS.get(_action, None)(**kwargs)
 
 
 def pybenzinaconcat(args, argv=None):
-    result_arr = _trim_action_kwarg(**vars(args))
+    result_arr = _run_action(**vars(args))
 
     if isinstance(result_arr, jug.Task):
         result_arr = [result_arr]
@@ -685,13 +687,13 @@ def pybenzinaconcat(args, argv=None):
             args = [{**vars(args), "src": result_arr}]
         else:
             args = [vars(args)]
-        result_arr = [_trim_action_kwarg(**_args) for _args in args]
+        result_arr = [_run_action(**_args) for _args in args]
     
     return result_arr
 
 
-ACTIONS = {"transcode": transcode, "concat": concat, "extract": extract}
+ACTIONS = {"concat": concat, "extract": extract, "transcode": transcode}
 ACTIONS_PARSER = {"concat": build_concat_parser(),
-                  "transcode": build_transcode_parser(),
                   "extract": build_extract_parser(),
+                  "transcode": build_transcode_parser(),
                   "_": build_base_parser()}
