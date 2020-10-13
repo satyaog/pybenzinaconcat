@@ -136,10 +136,6 @@ def _concat_file(concat_f, filepath):
                            .format(filepath, task.hash()))
 
     try:
-        if task.is_failed():
-            # Invalidate prior rerun
-            task.invalidate()
-
         # If filepath task has already executed, then the file has
         # already been concatenated
         if task.can_load():
@@ -152,9 +148,11 @@ def _concat_file(concat_f, filepath):
             concat_f.write(f.read())
     except Exception:
         task.fail()
+        task.invalidate()
         raise
     finally:
-        task.unlock()
+        if not task.is_failed():
+            task.unlock()
 
     os.remove(filepath)
     return filepath
@@ -332,11 +330,13 @@ def try_transcode_task(task, input_path):
             task.fail()
             task.invalidate()
             return False
-        task.unlock()
     except Exception:
         task.fail()
         task.invalidate()
         raise
+    finally:
+        if not task.is_failed():
+            task.unlock()
 
     return not task.is_failed()
 
