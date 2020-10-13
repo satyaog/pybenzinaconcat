@@ -7,8 +7,9 @@ from pybenzinaparse import Parser, boxes as bx_def
 
 from pybenzinaconcat.create_container import create_container, parse_args
 
+TESTS_WORKING_DIR = os.path.dirname(__file__)
 
-PWD = "tests_tmp"
+PWD = os.path.join(TESTS_WORKING_DIR, "tests_tmp")
 
 if PWD and not os.path.exists(PWD):
     os.makedirs(PWD)
