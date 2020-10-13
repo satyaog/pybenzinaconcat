@@ -94,7 +94,7 @@ class TinyImageNet(Dataset):
 
     @property
     def size(self):
-        return 1200000
+        return 120000
 
     @property
     def indices(self):
