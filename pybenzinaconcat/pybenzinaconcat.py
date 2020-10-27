@@ -670,7 +670,15 @@ def _run_action(_action=None, **kwargs):
     return ACTIONS.get(_action, None)(**kwargs)
 
 
-def pybenzinaconcat(args, argv=None):
+def main(args=None, argv=None):
+    if args is None:
+        args, argv = parse_args()
+    else:
+        try:
+            args, argv = args
+        except TypeError:
+            pass
+
     result_arr = _run_action(**vars(args))
 
     if isinstance(result_arr, jug.Task):

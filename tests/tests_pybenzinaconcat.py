@@ -10,7 +10,7 @@ from jug.tests.task_reset import task_reset
 from pybenzinaconcat.pybenzinaconcat import FILENAME_TEMPLATE, _get_file_index, \
     _get_clean_filepath, _is_transcoded, \
     _make_index_filepath, _make_transcoded_filepath, \
-    concat, extract, transcode, parse_args, pybenzinaconcat
+    concat, extract, transcode, parse_args, main
 
 TESTS_WORKING_DIR = os.path.dirname(__file__)
 DATA_DIR = os.path.join(TESTS_WORKING_DIR, "test_datasets")
@@ -29,7 +29,8 @@ os.chdir(PWD)
 def _run_tasks(tasks) -> list:
     for task in tasks:
         _run_tasks(recursive_dependencies(task))
-        task.run()
+        if not task.can_load() and task.can_run():
+            task.run()
     return jug.value(tasks)
 
 
@@ -158,7 +159,7 @@ def test_concat_no_queue():
 
 @task_reset
 def test_pybenzinaconcat_concat():
-    """Test that files are concatenated sequentially using the pybenzinaconcat
+    """Test that files are concatenated sequentially using the main
     entry point
     """
     src = "input/dir/"
@@ -173,12 +174,12 @@ def test_pybenzinaconcat_concat():
                                                 "file_{}_5mb.img.transcoded"
                                                 .format(i)))
 
-    args = parse_args(["concat", src, dest])
+    args, argv = parse_args(["concat", src, dest])
 
     try:
         files_bytes = _prepare_concat_data(to_concat_filepaths, queue_dir,
                                            dest_dir)
-        concat_filepaths, _ = _run_tasks(pybenzinaconcat(*args))[0]
+        concat_filepaths, _ = _run_tasks(main(args, argv))[0]
         _test_concat(to_concat_filepaths, concat_filepaths, files_bytes, dest)
 
     finally:
@@ -433,7 +434,7 @@ def test_trancode_excludes():
 
 @task_reset
 def test_pybenzinaconcat_trancode():
-    """Test that files are transcoded using the pybenzinaconcat entry point"""
+    """Test that files are transcoded using the main entry point"""
     dest = "output/dir/"
     dest_dir = os.path.dirname(dest)
     tmp_dir = "tmp/"
@@ -443,12 +444,12 @@ def test_pybenzinaconcat_trancode():
         tmp_filepaths.append(os.path.join(tmp_dir,
                                           "file_{}_5mb.img".format(i)))
 
-    args = parse_args(["transcode", ','.join(tmp_filepaths), dest])
+    args, argv = parse_args(["transcode", ','.join(tmp_filepaths), dest])
 
     try:
         files_bytes = _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir)
         targets_bytes = [b'' for _ in range(len(tmp_filepaths))]
-        transcode_filepaths = _run_tasks(pybenzinaconcat(*args))[0]
+        transcode_filepaths = _run_tasks(main(args, argv))[0]
         assert len(transcode_filepaths) == len(tmp_filepaths)
         _test_trancode(tmp_filepaths, dest_dir, files_bytes, targets_bytes)
 
@@ -459,7 +460,7 @@ def test_pybenzinaconcat_trancode():
 @task_reset
 def test_pybenzinaconcat_trancode_chain_concat():
     """Test that files are transcoded then concatenated sequentially using the
-    pybenzinaconcat entry point
+    main entry point
     """
     dest = "output/dir/"
     dest_dir = os.path.dirname(dest)
@@ -472,12 +473,12 @@ def test_pybenzinaconcat_trancode_chain_concat():
         tmp_filepaths.append(os.path.join(tmp_dir,
                                           "file_{}_5mb.img".format(i)))
 
-    args = parse_args(["transcode", ','.join(tmp_filepaths), dest,
-                       "--concat", concat_file])
+    args, argv = parse_args(["transcode", ','.join(tmp_filepaths), dest,
+                             "--concat", concat_file])
 
     try:
         files_bytes = _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir)
-        concat_filepaths, _ = _run_tasks(pybenzinaconcat(*args)[0])[0]
+        concat_filepaths, _ = _run_tasks(main(args, argv)[0])[0]
         assert len(concat_filepaths) == len(tmp_filepaths)
         with open(concat_file, "rb") as f:
             assert f.read() == b''.join(files_bytes)
@@ -549,6 +550,40 @@ def test_python_trancode():
 
         _test_trancode(tmp_filepaths, dest_dir, files_bytes, targets_bytes)
 
+    finally:
+        shutil.rmtree(".", ignore_errors=True)
+
+
+def test_python_trancode_jugdir():
+    """Test that files are transcoded using python"""
+    dest = "output/dir/"
+    dest_dir = os.path.dirname(dest)
+    tmp_dir = "tmp/"
+
+    tmp_filepaths = []
+    for i in range(10):
+        tmp_filepaths.append(os.path.join(tmp_dir,
+                                          "file_{}_5mb.img".format(i)))
+
+    args = ["--", "transcode", ','.join(tmp_filepaths), dest]
+
+    try:
+        _ = _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir)
+        subprocess.run(["python3", "../../pybenzinaconcat"] + args, check=True)
+        assert os.path.exists("pybenzinaconcat.jugdir/")
+        shutil.rmtree("pybenzinaconcat.jugdir/", ignore_errors=True)
+
+        subprocess.run(["python3", "../../pybenzinaconcat",
+                        "--jugdir", "pybenzinaconcat.jugdir/"] + args,
+                       check=True)
+        assert os.path.exists("pybenzinaconcat.jugdir/")
+        shutil.rmtree("pybenzinaconcat.jugdir/", ignore_errors=True)
+
+        subprocess.run(["python3", "../../pybenzinaconcat",
+                        "--jugdir", "pybenzinaconcat__.jugdir/"] + args,
+                       check=True)
+        assert not os.path.exists("pybenzinaconcat.jugdir/")
+        assert os.path.exists("pybenzinaconcat__.jugdir/")
     finally:
         shutil.rmtree(".", ignore_errors=True)
 
@@ -933,7 +968,7 @@ def test_extract_start_batch_size():
 
 @task_reset
 def test_pybenzinaconcat_extract_chain_transcode():
-    """Test that files are extracted then transcoded using the pybenzinaconcat
+    """Test that files are extracted then transcoded using the main
     entry point
     """
     src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
@@ -945,9 +980,10 @@ def test_pybenzinaconcat_extract_chain_transcode():
     queue_dir = os.path.join(transcode_dest, "queue")
     transcode_tmp = "tmp/"
 
-    args = parse_args(["extract", src, dest, "tar", "--start", "10",
-                       "--size", "15", "--transcode", transcode_dest,
-                       "--tmp", transcode_tmp])
+    args, argv = parse_args(["extract", src, dest, "tar", "--start", "10",
+                             "--size", "15",
+                             "--transcode", transcode_dest,
+                             "--tmp", transcode_tmp])
 
     try:
         if upload_dir and not os.path.exists(upload_dir):
@@ -955,7 +991,7 @@ def test_pybenzinaconcat_extract_chain_transcode():
         if queue_dir and not os.path.exists(queue_dir):
             os.makedirs(queue_dir)
 
-        transcode_filepaths = _run_tasks(pybenzinaconcat(*args))[0]
+        transcode_filepaths = _run_tasks(main(args, argv))[0]
 
         queued_list = glob.glob(os.path.join(queue_dir, '*'))
         queued_list.sort()
@@ -989,7 +1025,7 @@ def test_pybenzinaconcat_extract_chain_transcode():
 @task_reset
 def test_pybenzinaconcat_extract_chain_transcode_mp4():
     """Test that files are extracted then transcoded to mop4 using the
-    pybenzinaconcat entry point
+    main entry point
     """
     src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
     dest = "output/dir/extract/"
@@ -1000,9 +1036,10 @@ def test_pybenzinaconcat_extract_chain_transcode_mp4():
     queue_dir = os.path.join(transcode_dest, "queue")
     transcode_tmp = "tmp/"
 
-    args = parse_args(["extract", src, dest, "tar", "--start", "10",
-                       "--size", "15", "--transcode", transcode_dest,
-                       "--mp4", "--tmp", transcode_tmp])
+    args, argv = parse_args(["extract", src, dest, "tar", "--start", "10",
+                             "--size", "15",
+                             "--transcode", transcode_dest, "--mp4",
+                             "--tmp", transcode_tmp])
 
     try:
         if upload_dir and not os.path.exists(upload_dir):
@@ -1010,7 +1047,7 @@ def test_pybenzinaconcat_extract_chain_transcode_mp4():
         if queue_dir and not os.path.exists(queue_dir):
             os.makedirs(queue_dir)
 
-        transcode_filepaths = _run_tasks(pybenzinaconcat(*args))[0]
+        transcode_filepaths = _run_tasks(main(args, argv))[0]
 
         extract_list = glob.glob(os.path.join(dest_dir, '*'))
         extract_list.sort()
@@ -1085,7 +1122,7 @@ def test_python_extract_batch_size_chain_transcode_mp4():
     queue_dir = os.path.join(transcode_dest, "queue")
     transcode_tmp = "tmp/"
 
-    args = ["extract", src, dest, "tar", "--start", "10", "--size", "15",
+    args = ["--", "extract", src, dest, "tar", "--start", "10", "--size", "15",
             "--transcode", transcode_dest, "--mp4", "--tmp", transcode_tmp]
 
     try:
@@ -1175,7 +1212,7 @@ def test_python_extract_batch_size_chain_transcode_chain_concat():
 
     concat_file = "output/dir/concat.bzna"
 
-    args = ["extract", src, dest, "tar", "--start", "10", "--size", "15",
+    args = ["--", "extract", src, dest, "tar", "--start", "10", "--size", "15",
             "--batch-size", "5",
             "--transcode", transcode_dest, "--tmp", transcode_tmp,
             "--concat", concat_file]

@@ -1,13 +1,14 @@
 from jug import is_jug_running
 
 if is_jug_running():
-    from pybenzinaconcat import pybenzinaconcat, parse_args
-    pybenzinaconcat(*parse_args())
+    from pybenzinaconcat.pybenzinaconcat import main
+    main()
 else:
+    import argparse
     from os.path import basename, dirname
-    from sys import argv
     from jug.jug import main
-    argv = ["jug", "execute",
-            "--jugdir", "{}.jugdir/".format(basename(dirname(__file__))),
-            "--", __file__] + argv[1:]
-    main(argv)
+    pkg = basename(dirname(__file__))
+    p = argparse.ArgumentParser()
+    p.add_argument("--jugdir", default="{}.jugdir/".format(pkg))
+    args, argv = p.parse_known_args()
+    main(["jug", "execute", "--jugdir", args.jugdir, __file__] + argv)
