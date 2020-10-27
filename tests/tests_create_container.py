@@ -21,9 +21,7 @@ def test_create_container():
     container_name = "container_name.bzna"
 
     try:
-        args = parse_args([container_name])
-
-        create_container(args)
+        create_container(container_name)
 
         assert os.path.exists(container_name)
 

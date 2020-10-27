@@ -1,2 +1,2 @@
-from pybenzinaconcat.create_container import create_container, parse_args
-create_container(parse_args())
+from pybenzinaconcat.create_container.create_container import main
+main()
