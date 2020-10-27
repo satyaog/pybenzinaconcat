@@ -1,4 +1,4 @@
-import os
+import os.path
 
 ID_FILENAME_TEMPLATE = "{index:012d}.{filename}"
 FILENAME_TEMPLATE = ID_FILENAME_TEMPLATE + ".transcoded"
@@ -57,6 +57,3 @@ def _get_remote_path(ssh_remote, path):
         return ':'.join([ssh_remote, path])
     else:
         return path
-
-
-

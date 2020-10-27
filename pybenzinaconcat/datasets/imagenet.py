@@ -4,7 +4,7 @@ import tarfile
 
 from jug import TaskGenerator
 
-from pybenzinaconcat import utils
+from pybenzinaconcat.utils import fnutils
 from pybenzinaconcat.datasets import Dataset
 
 h5py_spec = importlib.util.find_spec("h5py")
@@ -58,8 +58,9 @@ def extract_hdf5(dataset, dest, start, size):
         for i in range(start, end):
             filename = h5_f["filenames"][i][0].decode("utf-8")
             extract_filepath = os.path.join(extract_dir, filename)
-            extract_filepath = utils._make_index_filepath(extract_filepath, i)
-            target_filepath = utils._make_target_filepath(extract_filepath)
+            extract_filepath = fnutils._make_index_filepath(extract_filepath,
+                                                            i)
+            target_filepath = fnutils._make_target_filepath(extract_filepath)
 
             if not os.path.exists(extract_filepath):
                 with open(os.path.join(extract_dir, filename), "wb") as f:
@@ -100,9 +101,10 @@ def extract_tar(dataset, dest, start, size):
 
                 if index >= start:
                     filename = sub_member.name
-                    filename = utils._make_index_filepath(filename, index)
+                    filename = fnutils._make_index_filepath(filename, index)
                     extract_filepath = os.path.join(extract_dir, filename)
-                    target_filepath = utils._make_target_filepath(extract_filepath)
+                    target_filepath = \
+                        fnutils._make_target_filepath(extract_filepath)
 
                     if not os.path.exists(extract_filepath):
                         file_sub_tar.extract(sub_member, extract_dir)

@@ -14,7 +14,7 @@ from jug import TaskGenerator
 from PIL import Image
 
 import pybenzinaconcat.datasets as datasets
-from pybenzinaconcat import utils
+from pybenzinaconcat.utils import fnutils
 
 h5py_spec = importlib.util.find_spec("h5py")
 is_h5py_installed = h5py_spec is not None
@@ -95,7 +95,7 @@ def _concat_batch(batch, last_batch, dest):
     if last_batch is not None:
         last_concat_files, _ = last_batch
         if last_concat_files:
-            last_batch_file_idx = utils._get_file_index(last_concat_files[-1])
+            last_batch_file_idx = fnutils._get_file_index(last_concat_files[-1])
 
     # "Lock" concat file using jug
     task = jug.utils.identity("concat_file:" + dest)
@@ -112,10 +112,10 @@ def _concat_batch(batch, last_batch, dest):
         with open(dest, "ab") as concat_f:
             for i, filepath in enumerate(batch):
                 # Concat files sequentially
-                file_index = utils._get_file_index(filepath)
+                file_index = fnutils._get_file_index(filepath)
                 if file_index is not None:
-                    assert utils._get_file_index(filepath) > last_batch_file_idx
-                    last_batch_file_idx = utils._get_file_index(filepath)
+                    assert fnutils._get_file_index(filepath) > last_batch_file_idx
+                    last_batch_file_idx = fnutils._get_file_index(filepath)
 
                 if _concat_file(concat_f, filepath) is not None:
                     concatenated_files.append(filepath)
@@ -167,11 +167,11 @@ def to_bmp(input_path, dest_dir):
     im = Image.open(input_path, 'r')
     filename = os.path.basename(input_path)
     filename = os.path.join(dest_dir, os.path.splitext(filename)[0] + ".BMP")
-    target_path = utils._make_target_filepath(input_path)
+    target_path = fnutils._make_target_filepath(input_path)
     if os.path.isfile(target_path):
         with open(target_path, "rb") as f:
             target = f.read()
-        target_filename = utils._make_target_filepath(filename)
+        target_filename = fnutils._make_target_filepath(filename)
         with open(target_filename, "wb") as f:
             f.write(target)
     im.save(filename, "BMP")
@@ -185,12 +185,12 @@ def transcode_img(input_path, dest_dir, clean_basename, mp4, ssh_remote=None,
     tmp_dir = tmp if tmp is not None else \
               os.path.dirname(input_path)
     filename = os.path.basename(input_path)
-    target_path = utils._make_target_filepath(input_path)
+    target_path = fnutils._make_target_filepath(input_path)
 
     if tmp_dir and not os.path.exists(tmp_dir):
         os.makedirs(tmp_dir)
 
-    output_path = utils._make_transcoded_filepath(os.path.join(tmp_dir, filename))
+    output_path = fnutils._make_transcoded_filepath(os.path.join(tmp_dir, filename))
     command = ["python", "-m", "pybenzinaconcat.image2mp4"] \
               if mp4 else ["image2heif"]
     cmd_arguments = " --codec=h265 --tile=512:512:yuv420 --crf=10 " \
@@ -220,7 +220,7 @@ def transcode_img(input_path, dest_dir, clean_basename, mp4, ssh_remote=None,
 
     try:
         subprocess.run(["rsync", "-v", "--remove-source-files", output_path,
-                        utils._get_remote_path(ssh_remote, upload_dir)],
+                        fnutils._get_remote_path(ssh_remote, upload_dir)],
                        check=True)
     except subprocess.CalledProcessError:
         LOGGER.error("Could not move file [{}] to upload dir [{}]"
@@ -286,7 +286,7 @@ def transcode_batch(src, dest, exclude_files=tuple(), mp4=True,
     transcoded_imgs = []
     failed_imgs = []
     for input_path in src:
-        clean_basename = utils._get_clean_filepath(input_path, basename=True)
+        clean_basename = fnutils._get_clean_filepath(input_path, basename=True)
         if clean_basename in exclude_files:
             LOGGER.info("Ignoring [{}] since [{}] is excluded"
                         .format(input_path, clean_basename))
@@ -346,8 +346,8 @@ def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
             exclude_files = f.read().split('\n')
 
         for i, exclude in enumerate(exclude_files):
-            exclude_files[i] = utils._get_clean_filepath(exclude,
-                                                         basename=True)
+            exclude_files[i] = fnutils._get_clean_filepath(exclude,
+                                                           basename=True)
         exclude_files.sort()
     else:
         exclude_files = []

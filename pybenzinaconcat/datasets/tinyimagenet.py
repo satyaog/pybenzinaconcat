@@ -5,7 +5,7 @@ from bisect import bisect_left
 from jug import TaskGenerator
 import numpy as np
 
-from pybenzinaconcat import utils
+from pybenzinaconcat.utils import fnutils
 from pybenzinaconcat.datasets import Dataset
 
 
@@ -138,9 +138,9 @@ def extract_zip(dataset, dest, start, size):
             i += start
             fileinfo = zip_f.filelist[index]
             filename = os.path.basename(fileinfo.filename)
-            filename = utils._make_index_filepath(filename, i)
+            filename = fnutils._make_index_filepath(filename, i)
             extract_filepath = os.path.join(extract_dir, filename)
-            target_filepath = utils._make_target_filepath(extract_filepath)
+            target_filepath = fnutils._make_target_filepath(extract_filepath)
 
             if not os.path.exists(extract_filepath):
                 zip_f.extract(fileinfo, extract_dir)
