@@ -1,7 +1,9 @@
+from .benzina import Benzina
 from .imagenet import ImageNet
 from .tinyimagenet import TinyImageNet
 
-_MAP = {ImageNet.__name__.lower(): ImageNet,
+_MAP = {Benzina.__name__.lower(): Benzina,
+        ImageNet.__name__.lower(): ImageNet,
         TinyImageNet.__name__.lower(): TinyImageNet}
 ids = _MAP.keys()
 

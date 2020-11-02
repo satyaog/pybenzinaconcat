@@ -9,8 +9,8 @@ from jug import TaskGenerator
 
 from pybenzinaparse import Parser, boxes as bx_def
 from pybenzinaparse.headers import BoxHeader
-from pybenzinaparse.utils import get_trak_sample_bytes, find_boxes, find_traks, \
-                            make_meta_trak, make_vide_trak, make_mvhd
+from pybenzinaparse.utils import get_trak_sample_bytes, find_boxes, \
+    find_traks, make_meta_trak, make_vide_trak, make_mvhd
 
 
 @TaskGenerator

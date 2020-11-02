@@ -15,7 +15,8 @@ if is_h5py_installed:
 
 
 class ImageNet(Dataset):
-    SUPPORTED_FORMATS = ("hdf5", "tar")
+    SUPPORTED_FORMATS = ("hdf5", "tar") if is_h5py_installed else \
+        ("tar",)
 
     def __init__(self, src, ar_format):
         super().__init__(src, ar_format)
