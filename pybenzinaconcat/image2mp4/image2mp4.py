@@ -276,6 +276,9 @@ def i2m_frame_scale_and_pad(src, dest, src_width, src_height, codec, crf,
         moov.append(udta)
 
         mvhd.next_track_id = mvhd.next_track_id + 1
+    elif len(traks) < 2:
+        raise RuntimeError("Failed to transcode either the full size image or "
+                           "the thumbnail")
 
     return boxes
 
