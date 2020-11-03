@@ -237,6 +237,13 @@ def to_bmp(input_path, dest_dir):
     im = Image.open(input_path, 'r')
     filename = os.path.basename(input_path)
     filename = os.path.join(dest_dir, os.path.splitext(filename)[0] + ".BMP")
+    target_path = _make_target_filepath(input_path)
+    if os.path.isfile(target_path):
+        with open(target_path, "rb") as f:
+            target = f.read()
+        target_filename = _make_target_filepath(filename)
+        with open(target_filename, "wb") as f:
+            f.write(target)
     im.save(filename, "BMP")
     return filename
 
