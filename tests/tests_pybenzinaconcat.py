@@ -1,17 +1,24 @@
-import glob, os, shutil, subprocess
+import glob
+import os
+import shutil
+import subprocess
+
+import jug
+from jug.task import recursive_dependencies
+from jug.tests.task_reset import task_reset
 
 from pybenzinaconcat.pybenzinaconcat import FILENAME_TEMPLATE, _get_file_index, \
     _get_clean_filepath, _is_transcoded, \
     _make_index_filepath, _make_transcoded_filepath, \
-    concat, extract_archive, transcode, parse_args
+    concat, extract, transcode, parse_args, main
 
-TESTS_WORKING_DIR = os.path.abspath('.')
-DATA_DIR = os.path.abspath("test_datasets")
+TESTS_WORKING_DIR = os.path.dirname(__file__)
+DATA_DIR = os.path.join(TESTS_WORKING_DIR, "test_datasets")
 
 os.environ["PATH"] = ':'.join([os.environ["PATH"],
                                os.path.join(TESTS_WORKING_DIR, "mocks")])
 
-PWD = "tests_tmp"
+PWD = os.path.join(TESTS_WORKING_DIR, "tests_tmp")
 
 if PWD and not os.path.exists(PWD):
     os.makedirs(PWD)
@@ -19,8 +26,15 @@ if PWD and not os.path.exists(PWD):
 os.chdir(PWD)
 
 
-def _prepare_concat_data(to_concat_filepaths, nb_files_to_skip,
-                         completed_list_filepath, queue_dir, dest_dir):
+def _run_tasks(tasks) -> list:
+    for task in tasks:
+        _run_tasks(recursive_dependencies(task))
+        if not task.can_load() and task.can_run():
+            task.run()
+    return jug.value(tasks)
+
+
+def _prepare_concat_data(to_concat_filepaths, queue_dir, dest_dir):
     if queue_dir and not os.path.exists(queue_dir):
         os.makedirs(queue_dir)
     if dest_dir and not os.path.exists(dest_dir):
@@ -36,36 +50,30 @@ def _prepare_concat_data(to_concat_filepaths, nb_files_to_skip,
     files_bytes = []
     for i, process in enumerate(processes):
         process.wait()
+        assert process.returncode == 0
         with open(to_concat_filepaths[i], "rb") as file:
             files_bytes.append(file.read())
             assert len(files_bytes[i]) == 5000 * 1000
 
-    with open(completed_list_filepath, "w") as completed_list_file:
-        for to_concat_filepath in to_concat_filepaths[:nb_files_to_skip]:
-            completed_list_file.write(to_concat_filepath)
-            completed_list_file.write('\n')
-
     return files_bytes
 
 
-def _test_concat(to_concat_filepaths, nb_files_to_skip,
-                 completed_list_filepath, files_bytes, args):
-    with open(args.dest, "rb") as file:
-        assert file.read() == b''.join(files_bytes[nb_files_to_skip:])
+def _test_concat(to_concat_filepaths, concat_filepaths, files_bytes, dest):
+    with open(dest, "rb") as file:
+        assert file.read() == b''.join(files_bytes)
 
-    with open(completed_list_filepath, "r") \
-            as completed_list:
-        assert list(filter(None, completed_list.read().split('\n'))) == \
-               to_concat_filepaths
+    nb_files_to_skip = len(files_bytes) - len(concat_filepaths)
+    assert list(concat_filepaths) == to_concat_filepaths[nb_files_to_skip:]
 
 
+@task_reset
 def test_concat():
+    """Test that files are concatenated sequentially"""
     src = "input/dir/"
-    dest = "output/dir/concat.bza"
+    dest = "output/dir/concat.bzna"
     src_dir = os.path.dirname(src)
     dest_dir = os.path.dirname(dest)
     queue_dir = os.path.join(src_dir, "queue")
-    completed_list_filepath = os.path.join(src_dir, "completed_list")
 
     to_concat_filepaths = []
     for i in range(10):
@@ -73,55 +81,28 @@ def test_concat():
                                                 "file_{}_5mb.img.transcoded"
                                                 .format(i)))
 
-    args = parse_args(["concat", src, dest])
+    args, _ = parse_args(["concat", src, dest])
+    del args._action
 
     try:
-        files_bytes = \
-            _prepare_concat_data(to_concat_filepaths, 0,
-                                 completed_list_filepath, queue_dir, dest_dir)
-        concat(args)
-        _test_concat(to_concat_filepaths, 0, completed_list_filepath,
-                     files_bytes, args)
+        files_bytes = _prepare_concat_data(to_concat_filepaths, queue_dir,
+                                           dest_dir)
+        concat_filepaths, _ = _run_tasks(concat(**vars(args)))[0]
+        _test_concat(to_concat_filepaths, concat_filepaths, files_bytes,
+                     args.dest)
 
     finally:
         shutil.rmtree(".", ignore_errors=True)
 
 
-def test_concat_completed_3():
-    src = "input/dir/"
-    dest = "output/dir/concat.bza"
-    src_dir = os.path.dirname(src)
-    dest_dir = os.path.dirname(dest)
-    queue_dir = os.path.join(src_dir, "queue")
-    completed_list_filepath = os.path.join(src_dir, "completed_list")
-
-    to_concat_filepaths = []
-    for i in range(10):
-        to_concat_filepaths.append(os.path.join(queue_dir,
-                                                "file_{}_5mb.img.transcoded"
-                                                .format(i)))
-
-    args = parse_args(["concat", src, dest])
-
-    try:
-        files_bytes = \
-            _prepare_concat_data(to_concat_filepaths, 3,
-                                 completed_list_filepath, queue_dir, dest_dir)
-        concat(args)
-        _test_concat(to_concat_filepaths, 3, completed_list_filepath,
-                     files_bytes, args)
-
-    finally:
-        shutil.rmtree(".", ignore_errors=True)
-
-
+@task_reset
 def test_concat_index_completed_3():
+    """Test that files are concatenated only once"""
     src = "input/dir/"
-    dest = "output/dir/concat.bza"
+    dest = "output/dir/concat.bzna"
     src_dir = os.path.dirname(src)
     dest_dir = os.path.dirname(dest)
     queue_dir = os.path.join(src_dir, "queue")
-    completed_list_filepath = os.path.join(src_dir, "completed_list")
 
     to_concat_filepaths = []
     for i in range(10):
@@ -130,53 +111,84 @@ def test_concat_index_completed_3():
         filepath = _make_index_filepath(filepath, i)
         to_concat_filepaths.append(filepath)
 
-    args = parse_args(["concat", src, dest])
+    args, _ = parse_args(["concat", src, dest])
+    del args._action
 
     try:
-        files_bytes = \
-            _prepare_concat_data(to_concat_filepaths, 3,
-                                 completed_list_filepath, queue_dir, dest_dir)
-        concat(args)
-        _test_concat(to_concat_filepaths, 3, completed_list_filepath,
-                     files_bytes, args)
+        files_bytes = _prepare_concat_data(to_concat_filepaths[:3], queue_dir,
+                                           dest_dir)
+        concat_filepaths, _ = _run_tasks(concat(**vars(args)))[0]
+        _test_concat(to_concat_filepaths[:3], concat_filepaths, files_bytes,
+                     args.dest)
+
+        files_bytes += _prepare_concat_data(to_concat_filepaths, queue_dir,
+                                            dest_dir)[3:]
+        concat_filepaths, remain_filepaths = \
+            _run_tasks(concat(**vars(args)))[0]
+        assert remain_filepaths == to_concat_filepaths[:3]
+        _test_concat(to_concat_filepaths, remain_filepaths + concat_filepaths,
+                     files_bytes, args.dest)
 
     finally:
         shutil.rmtree(".", ignore_errors=True)
 
 
+@task_reset
 def test_concat_no_queue():
+    """Test that directories hierarchy is created even when there are no files
+    to concatenate
+    """
     src = "input/dir/"
-    dest = "output/dir/concat.bza"
+    dest = "output/dir/concat.bzna"
     src_dir = os.path.dirname(src)
-    completed_list_filepath = os.path.join(src_dir, "completed_list")
 
-    to_concat_filepaths = []
-
-    args = parse_args(["concat", src, dest])
+    args, _ = parse_args(["concat", src, dest])
+    del args._action
 
     try:
-        concat_bytes = b''
-        concat(args)
+        assert _run_tasks(concat(**vars(args)))[0] == ([], [])
 
         assert os.path.exists(os.path.join(src_dir, "upload/"))
         assert os.path.exists(os.path.join(src_dir, "queue/"))
 
-        with open(args.dest, "rb") as file:
-            assert file.read() == concat_bytes
-
-        with open(completed_list_filepath, "r") \
-             as completed_list:
-            assert list(filter(None, completed_list.read().split('\n'))) == \
-                   to_concat_filepaths
+        assert not os.path.exists(args.dest)
 
     finally:
         shutil.rmtree(".", ignore_errors=True)
 
 
-def _prepare_transcode_data(tmp_filepaths, nb_files_to_skip, tmp_dir, dest_dir):
+@task_reset
+def test_pybenzinaconcat_concat():
+    """Test that files are concatenated sequentially using the main
+    entry point
+    """
+    src = "input/dir/"
+    dest = "output/dir/concat.bzna"
+    src_dir = os.path.dirname(src)
+    dest_dir = os.path.dirname(dest)
+    queue_dir = os.path.join(src_dir, "queue")
+
+    to_concat_filepaths = []
+    for i in range(10):
+        to_concat_filepaths.append(os.path.join(queue_dir,
+                                                "file_{}_5mb.img.transcoded"
+                                                .format(i)))
+
+    args, argv = parse_args(["concat", src, dest])
+
+    try:
+        files_bytes = _prepare_concat_data(to_concat_filepaths, queue_dir,
+                                           dest_dir)
+        concat_filepaths, _ = _run_tasks(main(args, argv))[0]
+        _test_concat(to_concat_filepaths, concat_filepaths, files_bytes, dest)
+
+    finally:
+        shutil.rmtree(".", ignore_errors=True)
+
+
+def _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir):
     upload_dir = os.path.join(dest_dir, "upload")
     queue_dir = os.path.join(dest_dir, "queue")
-    completed_list_filepath = os.path.join(dest_dir, "completed_list")
 
     if tmp_dir and not os.path.exists(tmp_dir):
         os.makedirs(tmp_dir)
@@ -195,16 +207,10 @@ def _prepare_transcode_data(tmp_filepaths, nb_files_to_skip, tmp_dir, dest_dir):
     files_bytes = []
     for i, process in enumerate(processes):
         process.wait()
+        assert process.returncode == 0
         with open(tmp_filepaths[i], "rb") as file:
             files_bytes.append(file.read())
             assert len(files_bytes[i]) == 5000 * 1000
-
-    with open(completed_list_filepath, "w") as completed_list_file:
-        for tmp_filepath in tmp_filepaths[:nb_files_to_skip]:
-            tmp_filename = os.path.basename(tmp_filepath)
-            transcoded_filename = _make_transcoded_filepath(tmp_filename)
-            completed_list_file.write(os.path.join(queue_dir, transcoded_filename))
-            completed_list_file.write('\n')
 
     return files_bytes
 
@@ -213,14 +219,16 @@ def _prepare_transcode_target_data(tmp_filepaths):
     tragets_bytes = []
     for i, tmp_filepath in enumerate(tmp_filepaths):
         tragets_bytes.append(i.to_bytes(8, byteorder="little"))
-        with open(tmp_filepath + ".target", "xb") as file:
-            file.write(tragets_bytes[-1])
+        try:
+            with open(tmp_filepath + ".target", "xb") as file:
+                file.write(tragets_bytes[-1])
+        except FileExistsError:
+            continue
 
     return tragets_bytes
 
 
-def _test_trancode(tmp_filepaths, nb_files_to_skip, dest_dir,
-                   files_bytes, targets_bytes):
+def _test_trancode(tmp_filepaths, dest_dir, files_bytes, targets_bytes):
     upload_dir = os.path.join(dest_dir, "upload")
     queue_dir = os.path.join(dest_dir, "queue")
 
@@ -228,61 +236,46 @@ def _test_trancode(tmp_filepaths, nb_files_to_skip, dest_dir,
 
     queued_list = glob.glob(os.path.join(queue_dir, '*'))
     queued_list.sort()
-    assert len(queued_list) == len(tmp_filepaths) - nb_files_to_skip
+    assert len(queued_list) == len(tmp_filepaths)
 
     for i, filepath in enumerate(queued_list):
         with open(filepath, "rb") as file:
             file_bytes = file.read()
-        assert file_bytes == files_bytes[i + nb_files_to_skip] + \
-                             targets_bytes[i + nb_files_to_skip]
+        assert file_bytes == files_bytes[i] + targets_bytes[i]
 
 
+@task_reset
 def test_trancode():
+    """Test that files are transcoded to the correct location"""
     dest = "output/dir/"
     dest_dir = os.path.dirname(dest)
-    tmp_dir = "tmp"
+    tmp_dir = "tmp/"
 
     tmp_filepaths = []
     for i in range(10):
-        tmp_filepaths.append(os.path.join(tmp_dir, "file_{}_5mb.img".format(i)))
+        tmp_filepaths.append(os.path.join(tmp_dir,
+                                          "file_{}_5mb.img".format(i)))
 
-    args = parse_args(["transcode", ','.join(tmp_filepaths), dest])
+    args, _ = parse_args(["transcode", ','.join(tmp_filepaths), dest])
+    del args._action
 
     try:
-        files_bytes = _prepare_transcode_data(tmp_filepaths, 0, tmp_dir, dest_dir)
+        files_bytes = _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir)
         targets_bytes = [b'' for _ in range(len(tmp_filepaths))]
-        transcode(args)
-        _test_trancode(tmp_filepaths, 0, dest_dir, files_bytes, targets_bytes)
+        transcode_filepaths = _run_tasks([transcode(**vars(args))])[0]
+        assert len(transcode_filepaths) == len(tmp_filepaths)
+        _test_trancode(tmp_filepaths, dest_dir, files_bytes, targets_bytes)
 
     finally:
         shutil.rmtree(".", ignore_errors=True)
 
 
-def test_trancode_completed_3():
-    dest = "output/dir/"
-    dest_dir = os.path.dirname(dest)
-    tmp_dir = "tmp"
-
-    tmp_filepaths = []
-    for i in range(10):
-        tmp_filepaths.append(os.path.join(tmp_dir, "file_{}_5mb.img".format(i)))
-
-    args = parse_args(["transcode", ','.join(tmp_filepaths), dest])
-
-    try:
-        files_bytes = _prepare_transcode_data(tmp_filepaths, 3, tmp_dir, dest_dir)
-        targets_bytes = [b'' for _ in range(len(tmp_filepaths))]
-        transcode(args)
-        _test_trancode(tmp_filepaths, 3, dest_dir, files_bytes, targets_bytes)
-
-    finally:
-        shutil.rmtree(".", ignore_errors=True)
-
-
+@task_reset
 def test_trancode_index_completed_3():
+    """Test that files are transcoded only once"""
     dest = "output/dir/"
     dest_dir = os.path.dirname(dest)
-    tmp_dir = "tmp"
+    tmp_dir = "tmp/"
 
     tmp_filepaths = []
     for i in range(10):
@@ -291,92 +284,132 @@ def test_trancode_index_completed_3():
         filepath = _make_index_filepath(filepath, i)
         tmp_filepaths.append(filepath)
 
-    args = parse_args(["transcode", ','.join(tmp_filepaths), dest])
-
     try:
-        files_bytes = _prepare_transcode_data(tmp_filepaths, 3, tmp_dir, dest_dir)
+        files_bytes = _prepare_transcode_data(tmp_filepaths[:3], tmp_dir,
+                                              dest_dir)
         targets_bytes = [b'' for _ in range(len(tmp_filepaths))]
-        transcode(args)
-        _test_trancode(tmp_filepaths, 3, dest_dir, files_bytes, targets_bytes)
+        args, _ = parse_args(["transcode", ','.join(tmp_filepaths[:3]), dest])
+        del args._action
+        transcode_filepaths = _run_tasks([transcode(**vars(args))])[0]
+        assert len(transcode_filepaths) == len(tmp_filepaths[:3])
+        _test_trancode(tmp_filepaths[:3], dest_dir, files_bytes,
+                       targets_bytes[:3])
+
+        files_bytes += _prepare_transcode_data(tmp_filepaths, tmp_dir,
+                                               dest_dir)[3:]
+        args, _ = parse_args(["transcode", ','.join(tmp_filepaths), dest])
+        del args._action
+        transcode_filepaths = _run_tasks([transcode(**vars(args))])[0]
+        assert len(transcode_filepaths) == len(tmp_filepaths)
+        _test_trancode(tmp_filepaths, dest_dir, files_bytes, targets_bytes)
 
     finally:
         shutil.rmtree(".", ignore_errors=True)
 
 
+@task_reset
 def test_trancode_target_data():
+    """Test that files are transcoded with their target datum"""
     dest = "output/dir/"
     dest_dir = os.path.dirname(dest)
-    tmp_dir = "tmp"
+    tmp_dir = "tmp/"
 
     tmp_filepaths = []
     for i in range(10):
-        tmp_filepaths.append(os.path.join(tmp_dir, "file_{}_5mb.img".format(i)))
+        tmp_filepaths.append(os.path.join(tmp_dir,
+                                          "file_{}_5mb.img".format(i)))
 
-    args = parse_args(["transcode", ','.join(tmp_filepaths), dest])
+    args, _ = parse_args(["transcode", ','.join(tmp_filepaths), dest])
+    del args._action
 
     try:
-        files_bytes = _prepare_transcode_data(tmp_filepaths, 0, tmp_dir, dest_dir)
+        files_bytes = _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir)
         targets_bytes = _prepare_transcode_target_data(tmp_filepaths)
-        transcode(args)
-        _test_trancode(tmp_filepaths, 0, dest_dir, files_bytes, targets_bytes)
+        transcode_filepaths = _run_tasks([transcode(**vars(args))])[0]
+        assert len(transcode_filepaths) == len(tmp_filepaths)
+        _test_trancode(tmp_filepaths, dest_dir, files_bytes, targets_bytes)
 
     finally:
         shutil.rmtree(".", ignore_errors=True)
 
 
+@task_reset
 def test_trancode_target_data_completed_3():
+    """Test that files are transcoded only once with their target datum"""
     dest = "output/dir/"
     dest_dir = os.path.dirname(dest)
-    tmp_dir = "tmp"
+    tmp_dir = "tmp/"
 
     tmp_filepaths = []
     for i in range(10):
-        tmp_filepaths.append(os.path.join(tmp_dir, "file_{}_5mb.img".format(i)))
-
-    args = parse_args(["transcode", ','.join(tmp_filepaths), dest])
+        tmp_filepaths.append(os.path.join(tmp_dir,
+                                          "file_{}_5mb.img".format(i)))
 
     try:
-        files_bytes = _prepare_transcode_data(tmp_filepaths, 3, tmp_dir, dest_dir)
+        files_bytes = _prepare_transcode_data(tmp_filepaths[:3], tmp_dir,
+                                              dest_dir)
+        targets_bytes = _prepare_transcode_target_data(tmp_filepaths[:3])
+        args, _ = parse_args(["transcode", ','.join(tmp_filepaths[:3]), dest])
+        del args._action
+        transcode_filepaths = _run_tasks([transcode(**vars(args))])[0]
+        assert len(transcode_filepaths) == len(tmp_filepaths[:3])
+        _test_trancode(tmp_filepaths[:3], dest_dir, files_bytes,
+                       targets_bytes[:3])
+
+        files_bytes += _prepare_transcode_data(tmp_filepaths, tmp_dir,
+                                               dest_dir)[3:]
         targets_bytes = _prepare_transcode_target_data(tmp_filepaths)
-        transcode(args)
-        _test_trancode(tmp_filepaths, 3, dest_dir, files_bytes, targets_bytes)
+        args, _ = parse_args(["transcode", ','.join(tmp_filepaths), dest])
+        del args._action
+        transcode_filepaths = _run_tasks([transcode(**vars(args))])[0]
+        assert len(transcode_filepaths) == len(tmp_filepaths)
+        _test_trancode(tmp_filepaths, dest_dir, files_bytes, targets_bytes)
 
     finally:
         shutil.rmtree(".", ignore_errors=True)
 
 
+@task_reset
 def test_trancode_files_list():
+    """Test that files are transcoded using a list file"""
     dest = "output/dir/"
     dest_dir = os.path.dirname(dest)
-    tmp_dir = "tmp"
+    tmp_dir = "tmp/"
 
     tmp_filepaths = []
     for i in range(10):
-        tmp_filepaths.append(os.path.join(tmp_dir, "file_{}_5mb.img".format(i)))
+        tmp_filepaths.append(os.path.join(tmp_dir,
+                                          "file_{}_5mb.img".format(i)))
 
-    args = parse_args(["transcode", "list", dest])
+    args, _ = parse_args(["transcode", "list", dest])
+    del args._action
 
     try:
         with open("list", "w") as files_list:
             files_list.write('\n'.join(tmp_filepaths[3:]))
 
-        files_bytes = _prepare_transcode_data(tmp_filepaths, 0, tmp_dir, dest_dir)
+        files_bytes = _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir)
         targets_bytes = _prepare_transcode_target_data(tmp_filepaths)
-        transcode(args)
-        _test_trancode(tmp_filepaths, 3, dest_dir, files_bytes, targets_bytes)
+        transcode_filepaths = _run_tasks([transcode(**vars(args))])[0]
+        assert len(transcode_filepaths) == len(tmp_filepaths[3:])
+        _test_trancode(tmp_filepaths[3:], dest_dir, files_bytes[3:],
+                       targets_bytes[3:])
 
     finally:
         shutil.rmtree(".", ignore_errors=True)
 
 
+@task_reset
 def test_trancode_excludes():
+    """Test that files are excluded from transcoding using an excludes file"""
     dest = "output/dir/"
     dest_dir = os.path.dirname(dest)
-    tmp_dir = "tmp"
+    tmp_dir = "tmp/"
 
     tmp_filepaths = []
     for i in range(10):
-        tmp_filepaths.append(os.path.join(tmp_dir, "file_{}_5mb.img".format(i)))
+        tmp_filepaths.append(os.path.join(tmp_dir,
+                                          "file_{}_5mb.img".format(i)))
 
     try:
         with open("list", "w") as files_list:
@@ -384,29 +417,194 @@ def test_trancode_excludes():
         with open("excludes", "w") as excludes:
             excludes.write('\n'.join(tmp_filepaths[:3]))
 
-        args = parse_args(["transcode", "list", dest, "--excludes=excludes"])
+        args, _ = parse_args(["transcode", "list", dest,
+                              "--excludes", "excludes"])
+        del args._action
 
-        files_bytes = _prepare_transcode_data(tmp_filepaths, 0, tmp_dir, dest_dir)
+        files_bytes = _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir)
         targets_bytes = _prepare_transcode_target_data(tmp_filepaths)
-        transcode(args)
-        _test_trancode(tmp_filepaths, 3, dest_dir, files_bytes, targets_bytes)
+        transcode_filepaths = _run_tasks([transcode(**vars(args))])[0]
+        assert len(transcode_filepaths) == len(tmp_filepaths[3:])
+        _test_trancode(tmp_filepaths[3:], dest_dir, files_bytes[3:],
+                       targets_bytes[3:])
 
     finally:
         shutil.rmtree(".", ignore_errors=True)
 
 
-def test_extract_tar():
+@task_reset
+def test_pybenzinaconcat_trancode():
+    """Test that files are transcoded using the main entry point"""
+    dest = "output/dir/"
+    dest_dir = os.path.dirname(dest)
+    tmp_dir = "tmp/"
+
+    tmp_filepaths = []
+    for i in range(10):
+        tmp_filepaths.append(os.path.join(tmp_dir,
+                                          "file_{}_5mb.img".format(i)))
+
+    args, argv = parse_args(["transcode", ','.join(tmp_filepaths), dest])
+
+    try:
+        files_bytes = _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir)
+        targets_bytes = [b'' for _ in range(len(tmp_filepaths))]
+        transcode_filepaths = _run_tasks(main(args, argv))[0]
+        assert len(transcode_filepaths) == len(tmp_filepaths)
+        _test_trancode(tmp_filepaths, dest_dir, files_bytes, targets_bytes)
+
+    finally:
+        shutil.rmtree(".", ignore_errors=True)
+
+
+@task_reset
+def test_pybenzinaconcat_trancode_chain_concat():
+    """Test that files are transcoded then concatenated sequentially using the
+    main entry point
+    """
+    dest = "output/dir/"
+    dest_dir = os.path.dirname(dest)
+    tmp_dir = "tmp/"
+
+    concat_file = "output/dir/concat.bzna"
+
+    tmp_filepaths = []
+    for i in range(10):
+        tmp_filepaths.append(os.path.join(tmp_dir,
+                                          "file_{}_5mb.img".format(i)))
+
+    args, argv = parse_args(["transcode", ','.join(tmp_filepaths), dest,
+                             "--concat", concat_file])
+
+    try:
+        files_bytes = _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir)
+        concat_filepaths, _ = _run_tasks(main(args, argv)[0])[0]
+        assert len(concat_filepaths) == len(tmp_filepaths)
+        with open(concat_file, "rb") as f:
+            assert f.read() == b''.join(files_bytes)
+
+    finally:
+        shutil.rmtree(".", ignore_errors=True)  
+
+
+def test_jug_trancode():
+    """Test that files are transcoded using jug"""
+    dest = "output/dir/"
+    dest_dir = os.path.dirname(dest)
+    tmp_dir = "tmp/"
+
+    tmp_filepaths = []
+    for i in range(10):
+        tmp_filepaths.append(os.path.join(tmp_dir,
+                                          "file_{}_5mb.img".format(i)))
+
+    args = ["transcode", ','.join(tmp_filepaths), dest]
+
+    try:
+        files_bytes = _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir)
+        targets_bytes = [b'' for _ in range(len(tmp_filepaths))]
+
+        subprocess.run(
+            ["jug", "status", "--jugdir", "pybenzinaconcat.jugdir/", "--",
+             "../../pybenzinaconcat/__main__.py"] + args,
+            check=True)
+
+        processes = [subprocess.Popen(
+            ["jug", "execute", "--jugdir", "pybenzinaconcat.jugdir/", "--",
+             "../../pybenzinaconcat/__main__.py"] + args)
+            for _ in range(3)]
+
+        for p in processes:
+            p.wait()
+            assert p.returncode == 0
+
+        subprocess.run(
+            ["jug", "status", "--jugdir", "pybenzinaconcat.jugdir/", "--",
+             "../../pybenzinaconcat/__main__.py"] + args,
+            check=True)
+        
+        _test_trancode(tmp_filepaths, dest_dir, files_bytes, targets_bytes)
+
+    finally:
+        shutil.rmtree(".", ignore_errors=True)
+
+
+def test_python_trancode():
+    """Test that files are transcoded using python"""
+    dest = "output/dir/"
+    dest_dir = os.path.dirname(dest)
+    tmp_dir = "tmp/"
+
+    tmp_filepaths = []
+    for i in range(10):
+        tmp_filepaths.append(os.path.join(tmp_dir,
+                                          "file_{}_5mb.img".format(i)))
+
+    args = ["transcode", ','.join(tmp_filepaths), dest]
+
+    try:
+        files_bytes = _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir)
+        targets_bytes = [b'' for _ in range(len(tmp_filepaths))]
+
+        subprocess.run(["python", "../../pybenzinaconcat"] + args, check=True)
+
+        _test_trancode(tmp_filepaths, dest_dir, files_bytes, targets_bytes)
+
+    finally:
+        shutil.rmtree(".", ignore_errors=True)
+
+
+def test_python_trancode_jugdir():
+    """Test that files are transcoded using python"""
+    dest = "output/dir/"
+    dest_dir = os.path.dirname(dest)
+    tmp_dir = "tmp/"
+
+    tmp_filepaths = []
+    for i in range(10):
+        tmp_filepaths.append(os.path.join(tmp_dir,
+                                          "file_{}_5mb.img".format(i)))
+
+    args = ["--", "transcode", ','.join(tmp_filepaths), dest]
+
+    try:
+        _ = _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir)
+        subprocess.run(["python3", "../../pybenzinaconcat"] + args, check=True)
+        assert os.path.exists("pybenzinaconcat.jugdir/")
+        shutil.rmtree("pybenzinaconcat.jugdir/", ignore_errors=True)
+
+        subprocess.run(["python3", "../../pybenzinaconcat",
+                        "--jugdir", "pybenzinaconcat.jugdir/"] + args,
+                       check=True)
+        assert os.path.exists("pybenzinaconcat.jugdir/")
+        shutil.rmtree("pybenzinaconcat.jugdir/", ignore_errors=True)
+
+        subprocess.run(["python3", "../../pybenzinaconcat",
+                        "--jugdir", "pybenzinaconcat__.jugdir/"] + args,
+                       check=True)
+        assert not os.path.exists("pybenzinaconcat.jugdir/")
+        assert os.path.exists("pybenzinaconcat__.jugdir/")
+    finally:
+        shutil.rmtree(".", ignore_errors=True)
+
+
+@task_reset
+def test_extract():
+    """Test that files are extracted"""
     src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
     dest = "output/dir/extract/"
     dest_dir = os.path.dirname(dest)
 
-    args = parse_args(["extract_archive", "tar", src, dest])
+    args, _ = parse_args(["extract", src, dest, "tar"])
+    del args._action
 
     try:
-        extract_archive(args)
+        extracted_filepaths = _run_tasks(extract(**vars(args)))[0]
 
         queued_list = glob.glob(os.path.join(dest_dir, '*'))
         queued_list.sort()
+        assert extracted_filepaths == \
+               list(filter(lambda fn: not fn.endswith(".target"), queued_list))
         assert queued_list == \
                ['output/dir/extract/000000000000.n01440764_2708.JPEG',
                 'output/dir/extract/000000000000.n01440764_2708.JPEG.target',
@@ -653,19 +851,24 @@ def test_extract_tar():
         shutil.rmtree(".", ignore_errors=True)
 
 
-def test_extract_tar_start_number():
+@task_reset
+def test_extract_start_size():
+    """Test that the correct number of files are extracted"""
     src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
     dest = "output/dir/extract/"
     dest_dir = os.path.dirname(dest)
 
-    args = parse_args(["extract_archive", "tar", src, dest,
-                       "--start", "10", "--number", "15"])
+    args, _ = parse_args(["extract", src, dest, "tar", "--start", "10",
+                          "--size", "15"])
+    del args._action
 
     try:
-        extract_archive(args)
+        extracted_filepaths = _run_tasks(extract(**vars(args)))[0]
 
         queued_list = glob.glob(os.path.join(dest_dir, '*'))
         queued_list.sort()
+        assert extracted_filepaths == \
+               list(filter(lambda fn: not fn.endswith(".target"), queued_list))
         assert queued_list == \
                ['output/dir/extract/000000000010.n01443537_2772.JPEG',
                 'output/dir/extract/000000000010.n01443537_2772.JPEG.target',
@@ -702,18 +905,85 @@ def test_extract_tar_start_number():
         shutil.rmtree(".", ignore_errors=True)
 
 
-def test_extract_tar_start_number_transcode():
+@task_reset
+def test_extract_start_batch_size():
+    """Test that the correct number of files are extracted"""
     src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
-    dest = "output/dir/"
-    tmp = "tmp/dir/"
+    dest = "output/dir/extract/"
     dest_dir = os.path.dirname(dest)
-    tmp_dir = os.path.dirname(tmp)
-    upload_dir = os.path.join(dest_dir, "upload")
-    queue_dir = os.path.join(dest_dir, "queue")
 
-    args = parse_args(["extract_archive", "tar", src, dest,
-                       "--start", "10", "--number", "15",
-                       "--transcode", "--tmp", tmp])
+    args, _ = parse_args(["extract", src, dest, "tar", "--start", "10",
+                          "--size", "15", "--batch-size", "5"])
+    del args._action
+
+    try:
+        extracted_filepaths = _run_tasks(extract(**vars(args)))
+        assert len(extracted_filepaths) == 3
+
+        for l in extracted_filepaths[1:]:
+            assert len(l) == 5
+            extracted_filepaths[0].extend(l)
+
+        extracted_filepaths = extracted_filepaths[0]
+
+        queued_list = glob.glob(os.path.join(dest_dir, '*'))
+        queued_list.sort()
+        assert extracted_filepaths == \
+               list(filter(lambda fn: not fn.endswith(".target"), queued_list))
+        assert queued_list == \
+               ['output/dir/extract/000000000010.n01443537_2772.JPEG',
+                'output/dir/extract/000000000010.n01443537_2772.JPEG.target',
+                'output/dir/extract/000000000011.n01443537_1029.JPEG',
+                'output/dir/extract/000000000011.n01443537_1029.JPEG.target',
+                'output/dir/extract/000000000012.n01443537_1955.JPEG',
+                'output/dir/extract/000000000012.n01443537_1955.JPEG.target',
+                'output/dir/extract/000000000013.n01443537_962.JPEG',
+                'output/dir/extract/000000000013.n01443537_962.JPEG.target',
+                'output/dir/extract/000000000014.n01443537_2563.JPEG',
+                'output/dir/extract/000000000014.n01443537_2563.JPEG.target',
+                'output/dir/extract/000000000015.n01443537_3344.JPEG',
+                'output/dir/extract/000000000015.n01443537_3344.JPEG.target',
+                'output/dir/extract/000000000016.n01443537_3601.JPEG',
+                'output/dir/extract/000000000016.n01443537_3601.JPEG.target',
+                'output/dir/extract/000000000017.n01443537_2333.JPEG',
+                'output/dir/extract/000000000017.n01443537_2333.JPEG.target',
+                'output/dir/extract/000000000018.n01443537_801.JPEG',
+                'output/dir/extract/000000000018.n01443537_801.JPEG.target',
+                'output/dir/extract/000000000019.n01443537_2228.JPEG',
+                'output/dir/extract/000000000019.n01443537_2228.JPEG.target',
+                'output/dir/extract/000000000020.n01484850_4496.JPEG',
+                'output/dir/extract/000000000020.n01484850_4496.JPEG.target',
+                'output/dir/extract/000000000021.n01484850_2506.JPEG',
+                'output/dir/extract/000000000021.n01484850_2506.JPEG.target',
+                'output/dir/extract/000000000022.n01484850_17864.JPEG',
+                'output/dir/extract/000000000022.n01484850_17864.JPEG.target',
+                'output/dir/extract/000000000023.n01484850_4645.JPEG',
+                'output/dir/extract/000000000023.n01484850_4645.JPEG.target',
+                'output/dir/extract/000000000024.n01484850_22221.JPEG',
+                'output/dir/extract/000000000024.n01484850_22221.JPEG.target']
+
+    finally:
+        shutil.rmtree(".", ignore_errors=True)
+
+
+@task_reset
+def test_pybenzinaconcat_extract_chain_transcode():
+    """Test that files are extracted then transcoded using the main
+    entry point
+    """
+    src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
+    dest = "output/dir/extract/"
+    dest_dir = os.path.dirname(dest)
+
+    transcode_dest = "output/dir/"
+    upload_dir = os.path.join(transcode_dest, "upload")
+    queue_dir = os.path.join(transcode_dest, "queue")
+    transcode_tmp = "tmp/"
+
+    args, argv = parse_args(["extract", src, dest, "tar", "--start", "10",
+                             "--size", "15",
+                             "--transcode", transcode_dest,
+                             "--tmp", transcode_tmp])
 
     try:
         if upload_dir and not os.path.exists(upload_dir):
@@ -721,7 +991,186 @@ def test_extract_tar_start_number_transcode():
         if queue_dir and not os.path.exists(queue_dir):
             os.makedirs(queue_dir)
 
-        extract_archive(args)
+        transcode_filepaths = _run_tasks(main(args, argv))[0]
+
+        queued_list = glob.glob(os.path.join(queue_dir, '*'))
+        queued_list.sort()
+        assert transcode_filepaths == \
+               list(filter(lambda fn: not fn.endswith(".target"), queued_list))
+        assert queued_list == \
+               ['output/dir/queue/000000000010.n01443537_2772.JPEG.transcoded',
+                'output/dir/queue/000000000011.n01443537_1029.JPEG.transcoded',
+                'output/dir/queue/000000000012.n01443537_1955.JPEG.transcoded',
+                'output/dir/queue/000000000013.n01443537_962.JPEG.transcoded',
+                'output/dir/queue/000000000014.n01443537_2563.JPEG.transcoded',
+                'output/dir/queue/000000000015.n01443537_3344.JPEG.transcoded',
+                'output/dir/queue/000000000016.n01443537_3601.JPEG.transcoded',
+                'output/dir/queue/000000000017.n01443537_2333.JPEG.transcoded',
+                'output/dir/queue/000000000018.n01443537_801.JPEG.transcoded',
+                'output/dir/queue/000000000019.n01443537_2228.JPEG.transcoded',
+                'output/dir/queue/000000000020.n01484850_4496.JPEG.transcoded',
+                'output/dir/queue/000000000021.n01484850_2506.JPEG.transcoded',
+                'output/dir/queue/000000000022.n01484850_17864.JPEG.transcoded',
+                'output/dir/queue/000000000023.n01484850_4645.JPEG.transcoded',
+                'output/dir/queue/000000000024.n01484850_22221.JPEG.transcoded']
+
+        assert len(glob.glob(os.path.join(dest_dir, '*'))) == 30
+        assert len(glob.glob(os.path.join(transcode_tmp, '*'))) == 0
+        assert len(glob.glob(os.path.join(upload_dir, '*'))) == 0
+
+    finally:
+        shutil.rmtree(".", ignore_errors=True)
+
+
+@task_reset
+def test_pybenzinaconcat_extract_chain_transcode_mp4():
+    """Test that files are extracted then transcoded to mop4 using the
+    main entry point
+    """
+    src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
+    dest = "output/dir/extract/"
+    dest_dir = os.path.dirname(dest)
+
+    transcode_dest = "output/dir/"
+    upload_dir = os.path.join(transcode_dest, "upload")
+    queue_dir = os.path.join(transcode_dest, "queue")
+    transcode_tmp = "tmp/"
+
+    args, argv = parse_args(["extract", src, dest, "tar", "--start", "10",
+                             "--size", "15",
+                             "--transcode", transcode_dest, "--mp4",
+                             "--tmp", transcode_tmp])
+
+    try:
+        if upload_dir and not os.path.exists(upload_dir):
+            os.makedirs(upload_dir)
+        if queue_dir and not os.path.exists(queue_dir):
+            os.makedirs(queue_dir)
+
+        transcode_filepaths = _run_tasks(main(args, argv))[0]
+
+        extract_list = glob.glob(os.path.join(dest_dir, '*'))
+        extract_list.sort()
+        assert extract_list == \
+               ['output/dir/extract/000000000010.n01443537_2772.JPEG',
+                'output/dir/extract/000000000010.n01443537_2772.JPEG.target',
+                'output/dir/extract/000000000011.n01443537_1029.JPEG',
+                'output/dir/extract/000000000011.n01443537_1029.JPEG.target',
+                'output/dir/extract/000000000012.n01443537_1955.JPEG',
+                'output/dir/extract/000000000012.n01443537_1955.JPEG.target',
+                'output/dir/extract/000000000013.n01443537_962.JPEG',
+                'output/dir/extract/000000000013.n01443537_962.JPEG.target',
+                'output/dir/extract/000000000014.n01443537_2563.JPEG',
+                'output/dir/extract/000000000014.n01443537_2563.JPEG.target',
+                'output/dir/extract/000000000015.n01443537_3344.JPEG',
+                'output/dir/extract/000000000015.n01443537_3344.JPEG.target',
+                'output/dir/extract/000000000016.n01443537_3601.JPEG',
+                'output/dir/extract/000000000016.n01443537_3601.JPEG.target',
+                'output/dir/extract/000000000017.n01443537_2333.JPEG',
+                'output/dir/extract/000000000017.n01443537_2333.JPEG.target',
+                'output/dir/extract/000000000018.n01443537_801.JPEG',
+                'output/dir/extract/000000000018.n01443537_801.JPEG.target',
+                'output/dir/extract/000000000019.n01443537_2228.JPEG',
+                'output/dir/extract/000000000019.n01443537_2228.JPEG.target',
+                'output/dir/extract/000000000020.n01484850_4496.JPEG',
+                'output/dir/extract/000000000020.n01484850_4496.JPEG.target',
+                'output/dir/extract/000000000021.n01484850_2506.JPEG',
+                'output/dir/extract/000000000021.n01484850_2506.JPEG.target',
+                'output/dir/extract/000000000022.n01484850_17864.JPEG',
+                'output/dir/extract/000000000022.n01484850_17864.JPEG.target',
+                'output/dir/extract/000000000023.n01484850_4645.JPEG',
+                'output/dir/extract/000000000023.n01484850_4645.JPEG.target',
+                'output/dir/extract/000000000024.n01484850_22221.JPEG',
+                'output/dir/extract/000000000024.n01484850_22221.JPEG.target']
+
+        queued_list = glob.glob(os.path.join(queue_dir, '*'))
+        queued_list.sort()
+        assert transcode_filepaths == \
+               list(filter(lambda fn: not fn.endswith(".target"), queued_list))
+        assert queued_list == \
+               ['output/dir/queue/000000000010.n01443537_2772.JPEG.transcoded',
+                'output/dir/queue/000000000011.n01443537_1029.JPEG.transcoded',
+                'output/dir/queue/000000000012.n01443537_1955.JPEG.transcoded',
+                'output/dir/queue/000000000013.n01443537_962.JPEG.transcoded',
+                'output/dir/queue/000000000014.n01443537_2563.JPEG.transcoded',
+                'output/dir/queue/000000000015.n01443537_3344.JPEG.transcoded',
+                'output/dir/queue/000000000016.n01443537_3601.JPEG.transcoded',
+                'output/dir/queue/000000000017.n01443537_2333.JPEG.transcoded',
+                'output/dir/queue/000000000018.n01443537_801.JPEG.transcoded',
+                'output/dir/queue/000000000019.n01443537_2228.JPEG.transcoded',
+                'output/dir/queue/000000000020.n01484850_4496.JPEG.transcoded',
+                'output/dir/queue/000000000021.n01484850_2506.JPEG.transcoded',
+                'output/dir/queue/000000000022.n01484850_17864.JPEG.transcoded',
+                'output/dir/queue/000000000023.n01484850_4645.JPEG.transcoded',
+                'output/dir/queue/000000000024.n01484850_22221.JPEG.transcoded']
+
+        assert len(glob.glob(os.path.join(transcode_tmp, '*'))) == 0
+        assert len(glob.glob(os.path.join(upload_dir, '*'))) == 0
+
+    finally:
+        shutil.rmtree(".", ignore_errors=True)
+
+
+def test_python_extract_batch_size_chain_transcode_mp4():
+    """Test that files are extracted then transcoded to mop4 using python"""
+    src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
+    dest = "output/dir/extract/"
+    dest_dir = os.path.dirname(dest)
+
+    transcode_dest = "output/dir/"
+    upload_dir = os.path.join(transcode_dest, "upload")
+    queue_dir = os.path.join(transcode_dest, "queue")
+    transcode_tmp = "tmp/"
+
+    args = ["--", "extract", src, dest, "tar", "--start", "10", "--size", "15",
+            "--transcode", transcode_dest, "--mp4", "--tmp", transcode_tmp]
+
+    try:
+        if upload_dir and not os.path.exists(upload_dir):
+            os.makedirs(upload_dir)
+        if queue_dir and not os.path.exists(queue_dir):
+            os.makedirs(queue_dir)
+
+        processes = [subprocess.Popen(["python", "../../pybenzinaconcat"] +
+                                      args) for _ in range(4)]
+
+        for p in processes:
+            p.wait()
+            assert p.returncode == 0
+
+        extract_list = glob.glob(os.path.join(dest_dir, '*'))
+        extract_list.sort()
+        assert extract_list == \
+               ['output/dir/extract/000000000010.n01443537_2772.JPEG',
+                'output/dir/extract/000000000010.n01443537_2772.JPEG.target',
+                'output/dir/extract/000000000011.n01443537_1029.JPEG',
+                'output/dir/extract/000000000011.n01443537_1029.JPEG.target',
+                'output/dir/extract/000000000012.n01443537_1955.JPEG',
+                'output/dir/extract/000000000012.n01443537_1955.JPEG.target',
+                'output/dir/extract/000000000013.n01443537_962.JPEG',
+                'output/dir/extract/000000000013.n01443537_962.JPEG.target',
+                'output/dir/extract/000000000014.n01443537_2563.JPEG',
+                'output/dir/extract/000000000014.n01443537_2563.JPEG.target',
+                'output/dir/extract/000000000015.n01443537_3344.JPEG',
+                'output/dir/extract/000000000015.n01443537_3344.JPEG.target',
+                'output/dir/extract/000000000016.n01443537_3601.JPEG',
+                'output/dir/extract/000000000016.n01443537_3601.JPEG.target',
+                'output/dir/extract/000000000017.n01443537_2333.JPEG',
+                'output/dir/extract/000000000017.n01443537_2333.JPEG.target',
+                'output/dir/extract/000000000018.n01443537_801.JPEG',
+                'output/dir/extract/000000000018.n01443537_801.JPEG.target',
+                'output/dir/extract/000000000019.n01443537_2228.JPEG',
+                'output/dir/extract/000000000019.n01443537_2228.JPEG.target',
+                'output/dir/extract/000000000020.n01484850_4496.JPEG',
+                'output/dir/extract/000000000020.n01484850_4496.JPEG.target',
+                'output/dir/extract/000000000021.n01484850_2506.JPEG',
+                'output/dir/extract/000000000021.n01484850_2506.JPEG.target',
+                'output/dir/extract/000000000022.n01484850_17864.JPEG',
+                'output/dir/extract/000000000022.n01484850_17864.JPEG.target',
+                'output/dir/extract/000000000023.n01484850_4645.JPEG',
+                'output/dir/extract/000000000023.n01484850_4645.JPEG.target',
+                'output/dir/extract/000000000024.n01484850_22221.JPEG',
+                'output/dir/extract/000000000024.n01484850_22221.JPEG.target']
 
         queued_list = glob.glob(os.path.join(queue_dir, '*'))
         queued_list.sort()
@@ -742,25 +1191,31 @@ def test_extract_tar_start_number_transcode():
                 'output/dir/queue/000000000023.n01484850_4645.JPEG.transcoded',
                 'output/dir/queue/000000000024.n01484850_22221.JPEG.transcoded']
 
-        assert len(glob.glob(os.path.join(tmp_dir, '*'))) == 30
+        assert len(glob.glob(os.path.join(transcode_tmp, '*'))) == 0
         assert len(glob.glob(os.path.join(upload_dir, '*'))) == 0
 
     finally:
         shutil.rmtree(".", ignore_errors=True)
 
 
-def test_extract_tar_start_number_transcode_mp4():
+def test_python_extract_batch_size_chain_transcode_chain_concat():
+    """Test that files are extracted then transcoded and finally concatenated
+    sequentially using python"""
     src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
-    dest = "./"
-    tmp = "extract/"
+    dest = "output/dir/extract/"
     dest_dir = os.path.dirname(dest)
-    tmp_dir = os.path.dirname(tmp)
-    upload_dir = os.path.join(dest_dir, "upload")
-    queue_dir = os.path.join(dest_dir, "queue")
 
-    args = parse_args(["extract_archive", "tar", src, dest,
-                       "--start", "10", "--number", "15",
-                       "--transcode", "--mp4", "--tmp", tmp])
+    transcode_dest = "output/dir/"
+    upload_dir = os.path.join(transcode_dest, "upload")
+    queue_dir = os.path.join(transcode_dest, "queue")
+    transcode_tmp = "tmp/"
+
+    concat_file = "output/dir/concat.bzna"
+
+    args = ["--", "extract", src, dest, "tar", "--start", "10", "--size", "15",
+            "--batch-size", "5",
+            "--transcode", transcode_dest, "--tmp", transcode_tmp,
+            "--concat", concat_file]
 
     try:
         if upload_dir and not os.path.exists(upload_dir):
@@ -768,144 +1223,56 @@ def test_extract_tar_start_number_transcode_mp4():
         if queue_dir and not os.path.exists(queue_dir):
             os.makedirs(queue_dir)
 
-        extract_archive(args)
+        processes = [subprocess.Popen(["python", "../../pybenzinaconcat"] +
+                                      args) for _ in range(6)]
 
-        extract_list = glob.glob(os.path.join(tmp_dir, '*'))
+        for p in processes:
+            p.wait(30)
+            assert p.returncode == 0
+
+        extract_list = glob.glob(os.path.join(dest_dir, '*'))
         extract_list.sort()
         assert extract_list == \
-               ['extract/000000000010.n01443537_2772.JPEG',
-                'extract/000000000010.n01443537_2772.JPEG.target',
-                'extract/000000000011.n01443537_1029.JPEG',
-                'extract/000000000011.n01443537_1029.JPEG.target',
-                'extract/000000000012.n01443537_1955.JPEG',
-                'extract/000000000012.n01443537_1955.JPEG.target',
-                'extract/000000000013.n01443537_962.JPEG',
-                'extract/000000000013.n01443537_962.JPEG.target',
-                'extract/000000000014.n01443537_2563.JPEG',
-                'extract/000000000014.n01443537_2563.JPEG.target',
-                'extract/000000000015.n01443537_3344.JPEG',
-                'extract/000000000015.n01443537_3344.JPEG.target',
-                'extract/000000000016.n01443537_3601.JPEG',
-                'extract/000000000016.n01443537_3601.JPEG.target',
-                'extract/000000000017.n01443537_2333.JPEG',
-                'extract/000000000017.n01443537_2333.JPEG.target',
-                'extract/000000000018.n01443537_801.JPEG',
-                'extract/000000000018.n01443537_801.JPEG.target',
-                'extract/000000000019.n01443537_2228.JPEG',
-                'extract/000000000019.n01443537_2228.JPEG.target',
-                'extract/000000000020.n01484850_4496.JPEG',
-                'extract/000000000020.n01484850_4496.JPEG.target',
-                'extract/000000000021.n01484850_2506.JPEG',
-                'extract/000000000021.n01484850_2506.JPEG.target',
-                'extract/000000000022.n01484850_17864.JPEG',
-                'extract/000000000022.n01484850_17864.JPEG.target',
-                'extract/000000000023.n01484850_4645.JPEG',
-                'extract/000000000023.n01484850_4645.JPEG.target',
-                'extract/000000000024.n01484850_22221.JPEG',
-                'extract/000000000024.n01484850_22221.JPEG.target']
+               ['output/dir/extract/000000000010.n01443537_2772.JPEG',
+                'output/dir/extract/000000000010.n01443537_2772.JPEG.target',
+                'output/dir/extract/000000000011.n01443537_1029.JPEG',
+                'output/dir/extract/000000000011.n01443537_1029.JPEG.target',
+                'output/dir/extract/000000000012.n01443537_1955.JPEG',
+                'output/dir/extract/000000000012.n01443537_1955.JPEG.target',
+                'output/dir/extract/000000000013.n01443537_962.JPEG',
+                'output/dir/extract/000000000013.n01443537_962.JPEG.target',
+                'output/dir/extract/000000000014.n01443537_2563.JPEG',
+                'output/dir/extract/000000000014.n01443537_2563.JPEG.target',
+                'output/dir/extract/000000000015.n01443537_3344.JPEG',
+                'output/dir/extract/000000000015.n01443537_3344.JPEG.target',
+                'output/dir/extract/000000000016.n01443537_3601.JPEG',
+                'output/dir/extract/000000000016.n01443537_3601.JPEG.target',
+                'output/dir/extract/000000000017.n01443537_2333.JPEG',
+                'output/dir/extract/000000000017.n01443537_2333.JPEG.target',
+                'output/dir/extract/000000000018.n01443537_801.JPEG',
+                'output/dir/extract/000000000018.n01443537_801.JPEG.target',
+                'output/dir/extract/000000000019.n01443537_2228.JPEG',
+                'output/dir/extract/000000000019.n01443537_2228.JPEG.target',
+                'output/dir/extract/000000000020.n01484850_4496.JPEG',
+                'output/dir/extract/000000000020.n01484850_4496.JPEG.target',
+                'output/dir/extract/000000000021.n01484850_2506.JPEG',
+                'output/dir/extract/000000000021.n01484850_2506.JPEG.target',
+                'output/dir/extract/000000000022.n01484850_17864.JPEG',
+                'output/dir/extract/000000000022.n01484850_17864.JPEG.target',
+                'output/dir/extract/000000000023.n01484850_4645.JPEG',
+                'output/dir/extract/000000000023.n01484850_4645.JPEG.target',
+                'output/dir/extract/000000000024.n01484850_22221.JPEG',
+                'output/dir/extract/000000000024.n01484850_22221.JPEG.target']
+        files_bytes = []
+        for fn in extract_list:
+            with open(fn, "rb") as f:
+                files_bytes.append(f.read())
 
-        queued_list = glob.glob(os.path.join(queue_dir, '*'))
-        queued_list.sort()
-        assert queued_list == \
-               ['./queue/000000000010.n01443537_2772.JPEG.transcoded',
-                './queue/000000000011.n01443537_1029.JPEG.transcoded',
-                './queue/000000000012.n01443537_1955.JPEG.transcoded',
-                './queue/000000000013.n01443537_962.JPEG.transcoded',
-                './queue/000000000014.n01443537_2563.JPEG.transcoded',
-                './queue/000000000015.n01443537_3344.JPEG.transcoded',
-                './queue/000000000016.n01443537_3601.JPEG.transcoded',
-                './queue/000000000017.n01443537_2333.JPEG.transcoded',
-                './queue/000000000018.n01443537_801.JPEG.transcoded',
-                './queue/000000000019.n01443537_2228.JPEG.transcoded',
-                './queue/000000000020.n01484850_4496.JPEG.transcoded',
-                './queue/000000000021.n01484850_2506.JPEG.transcoded',
-                './queue/000000000022.n01484850_17864.JPEG.transcoded',
-                './queue/000000000023.n01484850_4645.JPEG.transcoded',
-                './queue/000000000024.n01484850_22221.JPEG.transcoded']
+        with open(concat_file, "rb") as f:
+            assert f.read() == b''.join(files_bytes)
 
-        assert len(glob.glob(os.path.join(upload_dir, '*'))) == 0
-
-    finally:
-        shutil.rmtree(".", ignore_errors=True)
-
-
-def test_extract_tar_start_number_transcode_excludes():
-    src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
-    dest = "./"
-    tmp = "extract/"
-    dest_dir = os.path.dirname(dest)
-    tmp_dir = os.path.dirname(tmp)
-    upload_dir = os.path.join(dest_dir, "upload")
-    queue_dir = os.path.join(dest_dir, "queue")
-    transcode_excludes = ['extract/000000000010.n01443537_2772.JPEG.transcoded',
-                          'extract/000000000011.n01443537_1029.JPEG.transcoded',
-                          'extract/000000000012.n01443537_1955.JPEG.transcoded']
-
-    args = parse_args(["extract_archive", "tar", src, dest,
-                       "--start", "10", "--number", "15",
-                       "--transcode", "--excludes", "excludes",
-                       "--tmp", tmp])
-
-    try:
-        if upload_dir and not os.path.exists(upload_dir):
-            os.makedirs(upload_dir)
-        if queue_dir and not os.path.exists(queue_dir):
-            os.makedirs(queue_dir)
-        with open("excludes", "w") as excludes:
-            excludes.write('\n'.join(transcode_excludes[:3]))
-
-        extract_archive(args)
-
-        extract_list = glob.glob(os.path.join(tmp_dir, '*'))
-        extract_list.sort()
-        assert extract_list == \
-               ['extract/000000000010.n01443537_2772.JPEG',
-                'extract/000000000010.n01443537_2772.JPEG.target',
-                'extract/000000000011.n01443537_1029.JPEG',
-                'extract/000000000011.n01443537_1029.JPEG.target',
-                'extract/000000000012.n01443537_1955.JPEG',
-                'extract/000000000012.n01443537_1955.JPEG.target',
-                'extract/000000000013.n01443537_962.JPEG',
-                'extract/000000000013.n01443537_962.JPEG.target',
-                'extract/000000000014.n01443537_2563.JPEG',
-                'extract/000000000014.n01443537_2563.JPEG.target',
-                'extract/000000000015.n01443537_3344.JPEG',
-                'extract/000000000015.n01443537_3344.JPEG.target',
-                'extract/000000000016.n01443537_3601.JPEG',
-                'extract/000000000016.n01443537_3601.JPEG.target',
-                'extract/000000000017.n01443537_2333.JPEG',
-                'extract/000000000017.n01443537_2333.JPEG.target',
-                'extract/000000000018.n01443537_801.JPEG',
-                'extract/000000000018.n01443537_801.JPEG.target',
-                'extract/000000000019.n01443537_2228.JPEG',
-                'extract/000000000019.n01443537_2228.JPEG.target',
-                'extract/000000000020.n01484850_4496.JPEG',
-                'extract/000000000020.n01484850_4496.JPEG.target',
-                'extract/000000000021.n01484850_2506.JPEG',
-                'extract/000000000021.n01484850_2506.JPEG.target',
-                'extract/000000000022.n01484850_17864.JPEG',
-                'extract/000000000022.n01484850_17864.JPEG.target',
-                'extract/000000000023.n01484850_4645.JPEG',
-                'extract/000000000023.n01484850_4645.JPEG.target',
-                'extract/000000000024.n01484850_22221.JPEG',
-                'extract/000000000024.n01484850_22221.JPEG.target']
-
-        queued_list = glob.glob(os.path.join(queue_dir, '*'))
-        queued_list.sort()
-        assert queued_list == \
-               ['./queue/000000000013.n01443537_962.JPEG.transcoded',
-                './queue/000000000014.n01443537_2563.JPEG.transcoded',
-                './queue/000000000015.n01443537_3344.JPEG.transcoded',
-                './queue/000000000016.n01443537_3601.JPEG.transcoded',
-                './queue/000000000017.n01443537_2333.JPEG.transcoded',
-                './queue/000000000018.n01443537_801.JPEG.transcoded',
-                './queue/000000000019.n01443537_2228.JPEG.transcoded',
-                './queue/000000000020.n01484850_4496.JPEG.transcoded',
-                './queue/000000000021.n01484850_2506.JPEG.transcoded',
-                './queue/000000000022.n01484850_17864.JPEG.transcoded',
-                './queue/000000000023.n01484850_4645.JPEG.transcoded',
-                './queue/000000000024.n01484850_22221.JPEG.transcoded']
-
+        assert len(glob.glob(os.path.join(transcode_tmp, '*'))) == 0
+        assert len(glob.glob(os.path.join(queue_dir, '*'))) == 0
         assert len(glob.glob(os.path.join(upload_dir, '*'))) == 0
 
     finally:
@@ -966,70 +1333,116 @@ def test__make_transcoded_filepath():
 
 
 def test_action_redirection():
-    raw_concat_arguments = ["concat", "src_concat", "dest_concat"]
+    raw_concat_argv = ["concat", "src_concat", "dest_concat"]
 
-    raw_transcode_arguments = ["transcode",
-                               "src_transcode",
-                               "dest_transcode",
-                               "--ssh-remote", "remote_transcode",
-                               "--tmp", "tmp_transcode"]
+    raw_transcode_argv = ["transcode",
+                          "src_transcode",
+                          "dest_transcode",
+                          "--ssh-remote", "remote_transcode",
+                          "--tmp", "tmp_transcode"]
 
-    raw_extract_hdf5_arguments = ["extract_archive",
-                                  "hdf5",
-                                  "src_extract_hdf5",
-                                  "dest_extract_hdf5",
-                                  "--start", "10",
-                                  "--number", "15",
-                                  "--jobs", "2",
-                                  "--transcode",
-                                  "--ssh-remote", "remote_extract_hdf5",
-                                  "--tmp", "tmp_extract_hdf5"]
+    raw_transcode_w_extra_argv = ["transcode",
+                                  "src_transcode",
+                                  "dest_transcode",
+                                  "--ssh-remote", "remote_transcode",
+                                  "--tmp", "tmp_transcode",
+                                  "--concat",
+                                  "src_concat",
+                                  "dest_concat"]
 
-    raw_extract_tar_arguments = ["extract_archive",
-                                 "tar",
-                                 "src_extract_tar",
-                                 "dest_extract_tar",
-                                 "--start", "10",
-                                 "--number", "15",
-                                 "--jobs", "2",
-                                 "--transcode",
-                                 "--ssh-remote", "remote_extract_tar",
-                                 "--tmp", "tmp_extract_tar"]
+    raw_extract_hdf5_argv = ["extract",
+                             "src_extract_hdf5",
+                             "dest_extract_hdf5",
+                             "hdf5",
+                             "--start", "10",
+                             "--size", "15",
+                             "--batch-size", "5"]
 
-    args = parse_args(raw_concat_arguments)
+    raw_extract_tar_argv = ["extract",
+                            "src_extract_tar",
+                            "dest_extract_tar",
+                            "tar",
+                            "--start", "10",
+                            "--size", "15",
+                            "--batch-size", "5"]
 
-    assert args.action == "concat"
+    raw_extract_tar_w_extra_argv = ["extract",
+                                    "src_extract_tar",
+                                    "dest_extract_tar",
+                                    "tar",
+                                    "--start", "10",
+                                    "--size", "15",
+                                    "--batch-size", "5",
+                                    "--transcode",
+                                    "src_transcode",
+                                    "dest_transcode",
+                                    "--ssh-remote", "remote_transcode",
+                                    "--tmp", "tmp_transcode"]
+
+    args, argv = parse_args(raw_concat_argv)
+
+    assert args._action == "concat"
     assert args.src == "src_concat"
     assert args.dest == "dest_concat"
+    assert len(argv) == 0
 
-    args = parse_args(raw_transcode_arguments)
+    args, argv = parse_args(raw_transcode_argv)
 
-    assert args.action == "transcode"
+    assert args._action == "transcode"
     assert args.src == "src_transcode"
     assert args.dest == "dest_transcode"
     assert args.ssh_remote == "remote_transcode"
     assert args.tmp == "tmp_transcode"
+    assert len(argv) == 0
 
-    args = parse_args(raw_extract_hdf5_arguments)
+    args, argv = parse_args(raw_transcode_w_extra_argv)
+    concat_args, argv = parse_args(argv)
 
-    assert args.action == "extract_archive"
-    assert args.type == "hdf5"
+    assert args._action == "transcode"
+    assert args.src == "src_transcode"
+    assert args.dest == "dest_transcode"
+    assert args.ssh_remote == "remote_transcode"
+    assert args.tmp == "tmp_transcode"
+    assert concat_args._action == "concat"
+    assert concat_args.src == "src_concat"
+    assert concat_args.dest == "dest_concat"
+    assert len(argv) == 0
+
+    args, argv = parse_args(raw_extract_hdf5_argv)
+
+    assert args._action == "extract"
+    assert args.archive_type == "hdf5"
     assert args.src == "src_extract_hdf5"
     assert args.dest == "dest_extract_hdf5"
     assert args.start == 10
-    assert args.number == 15
-    assert args.jobs == 2
-    assert args.ssh_remote == "remote_extract_hdf5"
-    assert args.tmp == "tmp_extract_hdf5"
+    assert args.size == 15
+    assert args.batch_size == 5
+    assert len(argv) == 0
 
-    args = parse_args(raw_extract_tar_arguments)
+    args, argv = parse_args(raw_extract_tar_argv)
 
-    assert args.action == "extract_archive"
-    assert args.type == "tar"
+    assert args._action == "extract"
+    assert args.archive_type == "tar"
     assert args.src == "src_extract_tar"
     assert args.dest == "dest_extract_tar"
     assert args.start == 10
-    assert args.number == 15
-    assert args.jobs == 2
-    assert args.ssh_remote == "remote_extract_tar"
-    assert args.tmp == "tmp_extract_tar"
+    assert args.size == 15
+    assert args.batch_size == 5
+    assert len(argv) == 0
+
+    args, argv = parse_args(raw_extract_tar_w_extra_argv)
+    transcode_args, argv = parse_args(argv)
+
+    assert args._action == "extract"
+    assert args.archive_type == "tar"
+    assert args.src == "src_extract_tar"
+    assert args.dest == "dest_extract_tar"
+    assert args.start == 10
+    assert args.size == 15
+    assert args.batch_size == 5
+    assert transcode_args._action == "transcode"
+    assert transcode_args.src == "src_transcode"
+    assert transcode_args.dest == "dest_transcode"
+    assert transcode_args.ssh_remote == "remote_transcode"
+    assert transcode_args.tmp == "tmp_transcode"
+    assert len(argv) == 0

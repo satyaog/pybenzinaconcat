@@ -5,7 +5,7 @@ from pybenzinaparse import boxes as bx_def
 from pybenzinaparse.headers import BoxHeader
 
 
-def create_container(args):
+def create_container(container):
     ftyp = bx_def.FTYP(BoxHeader())
     ftyp.header.type = b"ftyp"
     ftyp.major_brand = 1769172845           # b"isom"
@@ -24,8 +24,10 @@ def create_container(args):
     mdat.header.box_ext_size = 0
     mdat.refresh_box_size()
 
-    args.container.write(bytes(ftyp) + bytes(mdat))
-    args.container.close()
+    if isinstance(container, str):
+        container = open(container, "xb")
+    container.write(bytes(ftyp) + bytes(mdat))
+    container.close()
 
 
 def build_parser():
@@ -40,3 +42,9 @@ def parse_args(raw_arguments=None):
     argv = sys.argv[1:] if raw_arguments is None else raw_arguments
     args = build_parser().parse_args(argv)
     return args
+
+
+def main(args=None):
+    if args is None:
+        args = parse_args()
+    create_container(**vars(args))
