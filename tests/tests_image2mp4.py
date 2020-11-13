@@ -6,10 +6,10 @@ from bitstring import ConstBitStream
 from pybenzinaparse import Parser, boxes as bx_def
 from pybenzinaparse.headers import BoxHeader
 
-from pybenzinaconcat.image2mp4 import image2mp4, parse_args
+from pybenzinaconcat.image2mp4 import image2mp4
 
 from pybenzinaconcat.image2mp4.image2mp4 import clap_traks, _clean_boxes, \
-    make_filenames_trak, make_targets_trak, reset_traks_id
+    make_filenames_trak, make_targets_trak, parse_args, reset_traks_id
 
 DATA_DIR = os.path.abspath("test_datasets")
 
@@ -233,7 +233,7 @@ def test_image2mp4():
                            "--hidden", "--name=target", "--mime=application/octet-stream",
                            "--item=type=mime,path={}/{}.target".format(dir, name)])
 
-        image2mp4(args)
+        image2mp4(**vars(args))
 
         bstr = ConstBitStream(filename=out)
         ftyp, mdat, moov = list(Parser.parse(bstr))
@@ -259,7 +259,7 @@ def test_image2mp4():
         # MOOV.TRAK.MDIA.MINF.STBL.STCO
         offset = stbl.boxes[4].entries[0].chunk_offset - \
                  mdat.header.start_pos - mdat.header.header_size
-        assert mdat.data[offset:offset + size] == bytes(name, "utf-8")
+        assert mdat.data[offset:offset + size] == bytes(name, "utf-8") + b'\0'
 
         trak = moov.boxes[3]
         assert trak.boxes[-1].boxes[1].name == b"bzna_target\0"

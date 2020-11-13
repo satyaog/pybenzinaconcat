@@ -276,13 +276,16 @@ def i2m_frame_scale_and_pad(src, dest, src_width, src_height, codec, crf,
         moov.append(udta)
 
         mvhd.next_track_id = mvhd.next_track_id + 1
+    elif len(traks) < 2:
+        raise RuntimeError("Failed to transcode either the full size image or "
+                           "the thumbnail")
 
     return boxes
 
 
-def image2mp4(args):
+def image2mp4(items, codec, tile, crf, output):
     src_item, target_item = None, None
-    for item in args.items:
+    for item in items:
         if item.primary:
             if src_item is not None:
                 raise RuntimeError("Multiple primary items provided")
@@ -294,7 +297,7 @@ def image2mp4(args):
         else:
             raise RuntimeError("Unknown item name [{}]".format(item.name))
 
-    tile = args.tile
+    tile = tile
 
     with Image.open(src_item.item.path) as src_file:
         src_width, src_height = src_file.size
@@ -304,9 +307,9 @@ def image2mp4(args):
     thumb_width = int(src_width * factor)
     thumb_height = int(src_height * factor)
 
-    boxes = i2m_frame_scale_and_pad(src_item.item.path, args.output,
-                                    src_width, src_height, args.codec, args.crf,
-                                    tile, src_item.thumb)
+    boxes = i2m_frame_scale_and_pad(src_item.item.path, output,
+                                    src_width, src_height, codec, crf, tile,
+                                    src_item.thumb)
 
     _clean_boxes(boxes)
 
@@ -325,7 +328,7 @@ def image2mp4(args):
             traks[:] = traks[0:1] + [target_trak] + traks[1:]
 
     filename_trak = make_filenames_trak(mdat, ftyp.header.box_size,
-                                        [bytes(src_item.name, "utf8")])
+                                        [bytes(src_item.name, "utf8") + b'\0'])
     traks[:] = traks[0:1] + [filename_trak] + traks[1:]
     clap_traks(traks, src_width, src_height, thumb_width, thumb_height)
 
@@ -338,7 +341,7 @@ def image2mp4(args):
         box.refresh_box_size()
         mp4_bytes_buffer.append(bytes(box))
 
-    with open(args.output, "wb") as output:
+    with open(output, "wb") as output:
         output.write(b''.join(mp4_bytes_buffer))
 
 
@@ -424,3 +427,9 @@ def parse_args(raw_arguments=None):
             item_argv = []
 
     return args
+
+
+def main(args=None):
+    if args is None:
+        args = parse_args()
+    image2mp4(**vars(args))

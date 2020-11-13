@@ -125,58 +125,78 @@ def _make_concat_dirs(root, ssh_remote=None):
     return upload_dir, queue_dir
 
 
+def _concat_file(concat_f, filepath):
+    # Concat file only once
+    task = identity("concat_file:" + filepath)
+
+    # No other thread should own the lock
+    if not task.lock():
+        raise RuntimeError("Could not obtain concat file task lock "
+                           "for image [{}]. Task's hash is [{}]"
+                           .format(filepath, task.hash()))
+
+    try:
+        # If filepath task has already executed, then the file has
+        # already been concatenated
+        if task.can_load():
+            LOGGER.warning("Ignoring [{}] since it has already been "
+                           "concatenated".format(filepath))
+            return None
+
+        task.run()
+        with open(filepath, "rb") as f:
+            concat_f.write(f.read())
+    except Exception:
+        task.fail()
+        task.invalidate()
+        raise
+    finally:
+        if not task.is_failed():
+            task.unlock()
+
+    os.remove(filepath)
+    return filepath
+
+
 @TaskGenerator
 def _concat_batch(batch, last_batch, dest):
+    last_batch_file_idx = -1
+
     if last_batch is not None:
         last_concat_files, _ = last_batch
-        last_batch_file_idx = _get_file_index(last_concat_files[-1])
-    else:
-        last_batch_file_idx = -1
+        if last_concat_files:
+            last_batch_file_idx = _get_file_index(last_concat_files[-1])
+
+    # "Lock" concat file using jug
+    task = identity("concat_file:" + dest)
+
+    # No other thread should own the lock
+    if not task.lock():
+        raise RuntimeError("Could not obtain concat file task lock for "
+                           "archive [{}]. Task's hash is [{}]"
+                           .format(dest, task.hash()))
 
     concatenated_files = []
-    with open(dest, "ab") as concat_file:
-        for i, filepath in enumerate(batch):
-            # Concat filessequentially
-            file_index = _get_file_index(filepath)
-            if file_index is not None:
-                assert _get_file_index(filepath) > last_batch_file_idx
-                last_batch_file_idx = _get_file_index(filepath)
 
-            # Concat file only once
-            task = identity("concat_files:" + filepath)
+    try:
+        with open(dest, "ab") as concat_f:
+            for i, filepath in enumerate(batch):
+                # Concat files sequentially
+                file_index = _get_file_index(filepath)
+                if file_index is not None:
+                    assert _get_file_index(filepath) > last_batch_file_idx
+                    last_batch_file_idx = _get_file_index(filepath)
 
-            # No other thread should own the lock
-            if not task.lock():
-                raise RuntimeError("Could not obtain concat file task lock "
-                                   "for image [{}]. Task's hash is [{}]"
-                                   .format(filepath, task.hash()))
+                if _concat_file(concat_f, filepath) is not None:
+                    concatenated_files.append(filepath)
 
-            try:
-                if task.is_failed():
-                    # Invalidate prior rerun
-                    task.invalidate()
-
-                # If filepath task has already executed, then the file has
-                # already been concatenated
-                if task.can_load():
-                    LOGGER.warning("Ignoring [{}] since it has already been "
-                                   "concatenated".format(filepath))
-                    continue
-
-                task.run()
-                with open(filepath, "rb") as f:
-                    concat_file.write(f.read())
-            except Exception:
-                task.fail()
-                raise
-            finally:
-                task.unlock()
-
-            os.remove(filepath)
-            concatenated_files.append(filepath)
+        if len(concatenated_files) == 0 and os.stat(dest).st_size == 0:
+            os.remove(dest)
+    finally:
+        task.unlock()
 
     concatenated_set = set(concatenated_files)
-    
+
     print("\n".join(concatenated_files))
     return concatenated_files, \
            [f for f in batch if f not in concatenated_set]
@@ -217,6 +237,13 @@ def to_bmp(input_path, dest_dir):
     im = Image.open(input_path, 'r')
     filename = os.path.basename(input_path)
     filename = os.path.join(dest_dir, os.path.splitext(filename)[0] + ".BMP")
+    target_path = _make_target_filepath(input_path)
+    if os.path.isfile(target_path):
+        with open(target_path, "rb") as f:
+            target = f.read()
+        target_filename = _make_target_filepath(filename)
+        with open(target_filename, "wb") as f:
+            f.write(target)
     im.save(filename, "BMP")
     return filename
 
@@ -310,55 +337,33 @@ def try_transcode_task(task, input_path):
             task.fail()
             task.invalidate()
             return False
-        task.unlock()
     except Exception:
         task.fail()
         task.invalidate()
         raise
+    finally:
+        if not task.is_failed():
+            task.unlock()
 
     return not task.is_failed()
 
 
 @TaskGenerator
-def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
-    """ Take a list of images and transcode them into a destination directory
-
-    The suffix ".transcoded" will be appended to the file's base name
-
-    Subdirectories 'upload' and 'queue' will be created in destination
-    directory where 'upload' contains the files that are being uploaded and
-    'queue' contains the files which are ready to be concatenated
-    """
-    dest_dir = dest
-
-    if isinstance(src, str):
-        source = src.split(',')
-        if len(source) == 1 and os.path.basename(source[0]) == "list":
-            with open(source[0], 'r') as files_list:
-                source = files_list.read().split('\n')
-    else:
-        source = src
-
-    if excludes is not None:
-        with open(excludes.name, excludes.mode) as f:
-            excluded_files = f.read().split('\n')
-
-        for i, exclude in enumerate(excluded_files):
-            excluded_files[i] = _get_clean_filepath(exclude, basename=True)
-    else:
-        excluded_files = []
+def transcode_batch(src, dest, exclude_files=tuple(), mp4=True,
+                    ssh_remote=None, tmp=None):
+    exclude_files = set(exclude_files)
 
     transcoded_imgs = []
     failed_imgs = []
-    for input_path in source:
+    for input_path in src:
         clean_basename = _get_clean_filepath(input_path, basename=True)
-        if clean_basename in excluded_files:
-            LOGGER.info("Ignoring [{}] since [{}] is in [{}]"
-                        .format(input_path, clean_basename, excludes.name))
+        if clean_basename in exclude_files:
+            LOGGER.info("Ignoring [{}] since [{}] is excluded"
+                        .format(input_path, clean_basename))
             continue
 
         # Transcode files sequentially and only once
-        task = transcode_img(input_path, dest_dir, clean_basename, mp4,
+        task = transcode_img(input_path, dest, clean_basename, mp4,
                              ssh_remote=ssh_remote, tmp=tmp)
 
         for i in range(2):
@@ -368,9 +373,9 @@ def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
             try:
                 # Transcode to BMP prior to H.265 to work around ffmpeg errors
                 bmp_path = to_bmp(input_path, tmp)
-                LOGGER.warning("Extra transcode step on [{}]: BMP written at [{}]"
-                               .format(input_path, bmp_path))
-                task = transcode_img(bmp_path, dest_dir, clean_basename, mp4,
+                LOGGER.warning("Extra transcode step on [{}]: BMP written at "
+                               "[{}]".format(input_path, bmp_path))
+                task = transcode_img(bmp_path, dest, clean_basename, mp4,
                                      ssh_remote=ssh_remote, tmp=tmp)
                 try_transcode_task(task, input_path)
             except FileNotFoundError:
@@ -382,16 +387,43 @@ def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
             transcoded_imgs.append(jug.value(task))
 
     if failed_imgs:
-        raise RuntimeError("Could not transcode all images [{}, ...]"
-                           .format(','.join(source[:2])))
-
-    # Raise when no images gets transcoded. Otherwise the task's results gets
-    # stored and returned in subsequent executions
-    if not transcoded_imgs:
-        raise RuntimeError("No image to transcode from [{}, ...]"
-                           .format(','.join(source[:2])))
+        raise RuntimeError("Could not transcode all images [{}]"
+                           .format(','.join(src[:2] + ["..."] + src[-1:])))
 
     return transcoded_imgs
+
+
+def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
+    """ Take a list of images and transcode them into a destination directory
+
+    The suffix ".transcoded" will be appended to the file's base name
+
+    Subdirectories 'upload' and 'queue' will be created in destination
+    directory where 'upload' contains the files that are being uploaded and
+    'queue' contains the files which are ready to be concatenated
+    """
+    if isinstance(src, str):
+        source = src.split(',')
+        if len(source) == 1 and os.path.basename(source[0]) == "list":
+            with open(source[0], 'r') as files_list:
+                source = files_list.read().split('\n')
+        source.sort()
+    else:
+        source = src
+
+    if excludes is not None:
+        with open(excludes.name, excludes.mode) as f:
+            exclude_files = f.read().split('\n')
+
+        for i, exclude in enumerate(exclude_files):
+            exclude_files[i] = _get_clean_filepath(exclude, basename=True)
+        exclude_files.sort()
+    else:
+        exclude_files = []
+
+    source = identity(source)
+    exclude_files = identity(exclude_files)
+    return transcode_batch(source, dest, exclude_files, mp4, ssh_remote, tmp)
 
 
 @TaskGenerator
@@ -604,7 +636,8 @@ def build_extract_parser():
                         else ["tar"],
                         help="type of the archive")
     parser.add_argument("--start", metavar="IDX", default=0, type=int,
-                        help="the start element index to transcode from source")
+                        help="the start element index to transcode from "
+                             "source")
     parser.add_argument("--size", default=0, metavar="NUM", type=int,
                         help="the number of elements to extract from source")
     parser.add_argument("--batch-size", default=512, metavar="NUM", type=int,
@@ -640,12 +673,20 @@ def parse_args(argv=None):
     return args, argv
 
 
-def _trim_action_kwarg(*args, _action=None, **kwargs):
-    return ACTIONS.get(_action, None)(*args, **kwargs)
+def _run_action(_action=None, **kwargs):
+    return ACTIONS.get(_action, None)(**kwargs)
 
 
-def pybenzinaconcat(args, argv=None):
-    result_arr = _trim_action_kwarg(**vars(args))
+def main(args=None, argv=None):
+    if args is None:
+        args, argv = parse_args()
+    else:
+        try:
+            args, argv = args
+        except TypeError:
+            pass
+
+    result_arr = _run_action(**vars(args))
 
     if isinstance(result_arr, jug.Task):
         result_arr = [result_arr]
@@ -661,13 +702,13 @@ def pybenzinaconcat(args, argv=None):
             args = [{**vars(args), "src": result_arr}]
         else:
             args = [vars(args)]
-        result_arr = [_trim_action_kwarg(**_args) for _args in args]
+        result_arr = [_run_action(**_args) for _args in args]
     
     return result_arr
 
 
-ACTIONS = {"transcode": transcode, "concat": concat, "extract": extract}
+ACTIONS = {"concat": concat, "extract": extract, "transcode": transcode}
 ACTIONS_PARSER = {"concat": build_concat_parser(),
-                  "transcode": build_transcode_parser(),
                   "extract": build_extract_parser(),
+                  "transcode": build_transcode_parser(),
                   "_": build_base_parser()}
