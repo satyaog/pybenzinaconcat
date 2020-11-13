@@ -7,10 +7,11 @@ import jug
 from jug.task import recursive_dependencies
 from jug.tests.task_reset import task_reset
 
-from pybenzinaconcat.pybenzinaconcat import FILENAME_TEMPLATE, _get_file_index, \
-    _get_clean_filepath, _is_transcoded, \
-    _make_index_filepath, _make_transcoded_filepath, \
-    concat, extract, transcode, parse_args, main
+from pybenzinaconcat.utils.fnutils import FILENAME_TEMPLATE, _get_file_index, \
+    _get_clean_filepath, _is_transcoded, _make_index_filepath, \
+    _make_transcoded_filepath
+from pybenzinaconcat.benzinaconcat import concat, extract, transcode, \
+    parse_args, main
 
 TESTS_WORKING_DIR = os.path.dirname(__file__)
 DATA_DIR = os.path.join(TESTS_WORKING_DIR, "test_datasets")
@@ -546,7 +547,7 @@ def test_python_trancode():
         files_bytes = _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir)
         targets_bytes = [b'' for _ in range(len(tmp_filepaths))]
 
-        subprocess.run(["python", "../../pybenzinaconcat"] + args, check=True)
+        subprocess.run(["python3", "../../pybenzinaconcat"] + args, check=True)
 
         _test_trancode(tmp_filepaths, dest_dir, files_bytes, targets_bytes)
 
@@ -595,7 +596,7 @@ def test_extract():
     dest = "output/dir/extract/"
     dest_dir = os.path.dirname(dest)
 
-    args, _ = parse_args(["extract", src, dest, "tar"])
+    args, _ = parse_args(["extract", src, dest, "imagenet:tar"])
     del args._action
 
     try:
@@ -858,8 +859,8 @@ def test_extract_start_size():
     dest = "output/dir/extract/"
     dest_dir = os.path.dirname(dest)
 
-    args, _ = parse_args(["extract", src, dest, "tar", "--start", "10",
-                          "--size", "15"])
+    args, _ = parse_args(["extract", src, dest, "imagenet:tar",
+                          "--start", "10", "--size", "15"])
     del args._action
 
     try:
@@ -912,8 +913,9 @@ def test_extract_start_batch_size():
     dest = "output/dir/extract/"
     dest_dir = os.path.dirname(dest)
 
-    args, _ = parse_args(["extract", src, dest, "tar", "--start", "10",
-                          "--size", "15", "--batch-size", "5"])
+    args, _ = parse_args(["extract", src, dest, "imagenet:tar",
+                          "--start", "10", "--size", "15",
+                          "--batch-size", "5"])
     del args._action
 
     try:
@@ -980,8 +982,8 @@ def test_pybenzinaconcat_extract_chain_transcode():
     queue_dir = os.path.join(transcode_dest, "queue")
     transcode_tmp = "tmp/"
 
-    args, argv = parse_args(["extract", src, dest, "tar", "--start", "10",
-                             "--size", "15",
+    args, argv = parse_args(["extract", src, dest, "imagenet:tar",
+                             "--start", "10", "--size", "15",
                              "--transcode", transcode_dest,
                              "--tmp", transcode_tmp])
 
@@ -1036,8 +1038,8 @@ def test_pybenzinaconcat_extract_chain_transcode_mp4():
     queue_dir = os.path.join(transcode_dest, "queue")
     transcode_tmp = "tmp/"
 
-    args, argv = parse_args(["extract", src, dest, "tar", "--start", "10",
-                             "--size", "15",
+    args, argv = parse_args(["extract", src, dest, "imagenet:tar",
+                             "--start", "10", "--size", "15",
                              "--transcode", transcode_dest, "--mp4",
                              "--tmp", transcode_tmp])
 
@@ -1122,7 +1124,8 @@ def test_python_extract_batch_size_chain_transcode_mp4():
     queue_dir = os.path.join(transcode_dest, "queue")
     transcode_tmp = "tmp/"
 
-    args = ["--", "extract", src, dest, "tar", "--start", "10", "--size", "15",
+    args = ["--", "extract", src, dest, "imagenet:tar", "--start", "10",
+            "--size", "15",
             "--transcode", transcode_dest, "--mp4", "--tmp", transcode_tmp]
 
     try:
@@ -1131,7 +1134,7 @@ def test_python_extract_batch_size_chain_transcode_mp4():
         if queue_dir and not os.path.exists(queue_dir):
             os.makedirs(queue_dir)
 
-        processes = [subprocess.Popen(["python", "../../pybenzinaconcat"] +
+        processes = [subprocess.Popen(["python3", "../../pybenzinaconcat"] +
                                       args) for _ in range(4)]
 
         for p in processes:
@@ -1212,8 +1215,8 @@ def test_python_extract_batch_size_chain_transcode_chain_concat():
 
     concat_file = "output/dir/concat.bzna"
 
-    args = ["--", "extract", src, dest, "tar", "--start", "10", "--size", "15",
-            "--batch-size", "5",
+    args = ["--", "extract", src, dest, "imagenet:tar", "--start", "10",
+            "--size", "15", "--batch-size", "5",
             "--transcode", transcode_dest, "--tmp", transcode_tmp,
             "--concat", concat_file]
 
@@ -1223,7 +1226,7 @@ def test_python_extract_batch_size_chain_transcode_chain_concat():
         if queue_dir and not os.path.exists(queue_dir):
             os.makedirs(queue_dir)
 
-        processes = [subprocess.Popen(["python", "../../pybenzinaconcat"] +
+        processes = [subprocess.Popen(["python3", "../../pybenzinaconcat"] +
                                       args) for _ in range(6)]
 
         for p in processes:
@@ -1353,7 +1356,7 @@ def test_action_redirection():
     raw_extract_hdf5_argv = ["extract",
                              "src_extract_hdf5",
                              "dest_extract_hdf5",
-                             "hdf5",
+                             "imagenet:hdf5",
                              "--start", "10",
                              "--size", "15",
                              "--batch-size", "5"]
@@ -1361,7 +1364,15 @@ def test_action_redirection():
     raw_extract_tar_argv = ["extract",
                             "src_extract_tar",
                             "dest_extract_tar",
-                            "tar",
+                            "imagenet:tar",
+                            "--start", "10",
+                            "--size", "15",
+                            "--batch-size", "5"]
+
+    raw_extract_tinyimzip_argv = ["extract",
+                            "src_extract_zip",
+                            "dest_extract_zip",
+                            "tinyimagenet:zip",
                             "--start", "10",
                             "--size", "15",
                             "--batch-size", "5"]
@@ -1369,7 +1380,7 @@ def test_action_redirection():
     raw_extract_tar_w_extra_argv = ["extract",
                                     "src_extract_tar",
                                     "dest_extract_tar",
-                                    "tar",
+                                    "imagenet:tar",
                                     "--start", "10",
                                     "--size", "15",
                                     "--batch-size", "5",
@@ -1411,7 +1422,8 @@ def test_action_redirection():
     args, argv = parse_args(raw_extract_hdf5_argv)
 
     assert args._action == "extract"
-    assert args.archive_type == "hdf5"
+    assert args.dataset_id == "imagenet"
+    assert args.dataset_format == "hdf5"
     assert args.src == "src_extract_hdf5"
     assert args.dest == "dest_extract_hdf5"
     assert args.start == 10
@@ -1422,9 +1434,22 @@ def test_action_redirection():
     args, argv = parse_args(raw_extract_tar_argv)
 
     assert args._action == "extract"
-    assert args.archive_type == "tar"
+    assert args.dataset_id == "imagenet"
+    assert args.dataset_format == "tar"
     assert args.src == "src_extract_tar"
     assert args.dest == "dest_extract_tar"
+    assert args.start == 10
+    assert args.size == 15
+    assert args.batch_size == 5
+    assert len(argv) == 0
+
+    args, argv = parse_args(raw_extract_tinyimzip_argv)
+
+    assert args._action == "extract"
+    assert args.dataset_id == "tinyimagenet"
+    assert args.dataset_format == "zip"
+    assert args.src == "src_extract_zip"
+    assert args.dest == "dest_extract_zip"
     assert args.start == 10
     assert args.size == 15
     assert args.batch_size == 5
@@ -1434,7 +1459,8 @@ def test_action_redirection():
     transcode_args, argv = parse_args(argv)
 
     assert args._action == "extract"
-    assert args.archive_type == "tar"
+    assert args.dataset_id == "imagenet"
+    assert args.dataset_format == "tar"
     assert args.src == "src_extract_tar"
     assert args.dest == "dest_extract_tar"
     assert args.start == 10
