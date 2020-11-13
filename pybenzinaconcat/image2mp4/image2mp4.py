@@ -277,6 +277,9 @@ def i2m_frame_scale_and_pad(src, dest, src_width, src_height, codec, crf,
 
         mvhd.next_track_id = mvhd.next_track_id + 1
     elif len(traks) < 2:
+        # FFMPEG can silently not transcode either the full size image or the
+        # thumbnail. No error is thrown if at least one can successfully be
+        # transcoded
         raise RuntimeError("Failed to transcode either the full size image or "
                            "the thumbnail")
 

@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="pybenzinaconcat",
-    version="0.2.0",
+    version="0.3.0",
     packages=find_packages(exclude=["test_*"]),
     url="https://github.com/satyaog/pybenzinaconcat",
     license="The MIT License",
