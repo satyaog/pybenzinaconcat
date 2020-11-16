@@ -92,9 +92,8 @@ class TinyImageNet(Dataset):
         self.val_indices[:] = range(self._VAL_IDX + 3,
                                     self._VAL_IDX + 3 + 10000)
 
-    @property
-    def size(self):
-        return 120000
+    def __len__(self):
+        return len(self._indices)
 
     @property
     def indices(self):
@@ -118,7 +117,7 @@ class TinyImageNet(Dataset):
     
     @staticmethod
     @TaskGenerator
-    def extract(dataset, dest, start=0, size=512):
+    def extract(dataset, dest, start=0, size=None):
         return extract_zip(dataset, dest, start, size)
 
 
@@ -132,7 +131,7 @@ def extract_zip(dataset, dest, start, size):
 
     with zipfile.ZipFile(dataset.src, 'r') as zip_f:
         start = start
-        end = min(start + size, dataset.size) if size else dataset.size
+        end = min(start + size, len(dataset)) if size else len(dataset)
 
         for i, index in enumerate(dataset.indices[start:end]):
             i += start

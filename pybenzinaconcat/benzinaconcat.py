@@ -5,8 +5,6 @@ import importlib.util
 import logging
 import os
 import subprocess
-import sys
-from collections import namedtuple
 
 import jug
 import jug.utils
@@ -14,7 +12,7 @@ from jug import TaskGenerator
 from PIL import Image
 
 import pybenzinaconcat.datasets as datasets
-from pybenzinaconcat.utils import fnutils
+from pybenzinaconcat.utils import argsutils, fnutils
 
 h5py_spec = importlib.util.find_spec("h5py")
 is_h5py_installed = h5py_spec is not None
@@ -169,6 +167,8 @@ def to_bmp(input_path, dest_dir):
     filename = os.path.join(dest_dir, os.path.splitext(filename)[0] + ".BMP")
     target_path = fnutils._make_target_filepath(input_path)
     if os.path.isfile(target_path):
+        # Move target close to the input for it to be picked up in the
+        # transcoding process
         with open(target_path, "rb") as f:
             target = f.read()
         target_filename = fnutils._make_target_filepath(filename)
@@ -357,8 +357,8 @@ def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
     return transcode_batch(source, dest, exclude_files, mp4, ssh_remote, tmp)
 
 
-def extract(src, dest, dataset_id, dataset_format, start=0, size=0,
-            batch_size=0):
+def extract(src, dest, dataset_id, dataset_format, start=0, size=None,
+            batch_size=1024):
     """ Take a source archive file and extract images from it into a
     destination directory.
     """
@@ -370,8 +370,8 @@ def extract(src, dest, dataset_id, dataset_format, start=0, size=0,
     dataset_cls = datasets.get_cls(dataset_id)
     dataset = dataset_cls(src, dataset_format)
 
-    if size == 0:
-        size = dataset.size
+    if size is None:
+        size = len(dataset)
 
     if size and batch_size:
         batch_size = min(size, batch_size)
@@ -395,44 +395,12 @@ def extract(src, dest, dataset_id, dataset_format, start=0, size=0,
     return [dataset_cls.extract(dataset, **kwargs) for kwargs in processes_kwargs]
 
 
-FileDesc = namedtuple("FileDesc", ["name", "mode"])
-
-
-class ChainAction(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string=None):
-        action = option_string.lstrip('-')
-        setattr(namespace, self.dest, [action] + values)
-
-
-class DatasetAction(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string=None):
-        dataset_id, ar_format = values.split(':')
-        dest = self.dest.lstrip('_')
-        setattr(namespace, dest + "_id", dataset_id)
-        setattr(namespace, dest + "_format", ar_format)
-        delattr(namespace, self.dest) 
-
-
-class CheckFileType(argparse.FileType):
-    def __call__(self, string):
-        f = super(CheckFileType, self).__call__(string)
-        f.close()
-        return FileDesc(f.name, f.mode)
-
-
-def _map_datasets_formats():
-    for label in datasets.ids:
-        for ar_format in datasets.get_cls(label).supported_formats():
-            yield "{}:{}".format(label, ar_format)
-
-
 def build_base_parser():
     parser = argparse.ArgumentParser(description="Benzina HEIF Concatenation",
+                                     add_help=False,
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("_action", metavar="action",
                         choices=list(ACTIONS.keys()), help="action to execute")
-    parser.add_argument('args', nargs=argparse.REMAINDER,
-                        help="action's arguments")
 
     return parser
 
@@ -463,7 +431,8 @@ def build_transcode_parser():
                              "of files to transcode")
     parser.add_argument("dest", metavar="destination",
                         help="directory to write the transcoded file(s)")
-    parser.add_argument("--excludes", default=None, type=CheckFileType('r'),
+    parser.add_argument("--excludes", default=None,
+                        type=argsutils.CheckFileType('r'),
                         help="a text file containing the list of files to exclude")
     parser.add_argument("--mp4", default=False, action="store_true",
                         help="use image2mp4 instead of image2heif")
@@ -473,8 +442,9 @@ def build_transcode_parser():
     parser.add_argument("--tmp", metavar="DIR",
                         help="the directory to use to store temporary file(s)")
 
-    parser.add_argument("--concat", metavar="...", action=ChainAction,
-                        dest="_chain", nargs=argparse.REMAINDER,
+    parser.add_argument("--concat", metavar="...",
+                        action=argsutils.ChainAction, dest="_chain",
+                        nargs=argparse.REMAINDER,
                         help="chain the concat action. concat will be fed by "
                              "transcode's dest through its src.")
 
@@ -491,18 +461,20 @@ def build_extract_parser():
                         help="archive file to extract the images from")
     parser.add_argument("dest", metavar="destination",
                         help="directory to write the extracted file(s)")
-    parser.add_argument("_dataset", choices=list(_map_datasets_formats()),
-                        action=DatasetAction, help="dataset id and format")
+    parser.add_argument("_dataset",
+                        choices=list(datasets.iter_datasets_formats()),
+                        action=argsutils.DatasetAction,
+                        help="dataset id and format")
     parser.add_argument("--start", metavar="IDX", default=0, type=int,
-                        help="the start element index to transcode from "
-                             "source")
-    parser.add_argument("--size", default=0, metavar="NUM", type=int,
+                        help="the start element index to extract from source")
+    parser.add_argument("--size", default=None, metavar="NUM", type=int,
                         help="the number of elements to extract from source")
-    parser.add_argument("--batch-size", default=512, metavar="NUM", type=int,
-                        help="the batch size for a single job.")
+    parser.add_argument("--batch-size", default=1024, metavar="NUM", type=int,
+                        help="the batch size for a single job")
 
-    parser.add_argument("--transcode", metavar="...", action=ChainAction,
-                        dest="_chain", nargs=argparse.REMAINDER,
+    parser.add_argument("--transcode", metavar="...",
+                        action=argsutils.ChainAction, dest="_chain",
+                        nargs=argparse.REMAINDER,
                         help="chain the transcode action. transcode will be "
                              "fed by extract's dest through its src.")
 
@@ -510,29 +482,7 @@ def build_extract_parser():
 
 
 def parse_args(argv=None):
-    argv = sys.argv[1:] if argv is None else argv
-    is_help_request = "-h" in argv
-
-    if is_help_request:
-        if len(argv) == 1:
-            build_base_parser().parse_args(argv)
-        argv.remove("-h")
-        base_args = build_base_parser().parse_args(argv)
-        ACTIONS_PARSER.get(base_args._action, None).parse_args(argv + ["-h"])
-
-    base_args = build_base_parser().parse_args(argv)
-    args = ACTIONS_PARSER.get(base_args._action, None) \
-        .parse_args([base_args._action] + base_args.args)
-    try:
-        argv = args._chain or tuple()
-        del args._chain
-    except AttributeError:
-        argv = tuple()
-    return args, argv
-
-
-def _run_action(_action=None, **kwargs):
-    return ACTIONS.get(_action, None)(**kwargs)
+    return argsutils.parse_args(ACTIONS_PARSER, argv)
 
 
 def main(args=None, argv=None):
@@ -544,7 +494,7 @@ def main(args=None, argv=None):
         except TypeError:
             pass
 
-    result_arr = _run_action(**vars(args))
+    result_arr = argsutils.run_action(ACTIONS, **vars(args))
 
     if isinstance(result_arr, jug.Task):
         result_arr = [result_arr]
@@ -560,7 +510,7 @@ def main(args=None, argv=None):
             args = [{**vars(args), "src": result_arr}]
         else:
             args = [vars(args)]
-        result_arr = [_run_action(**_args) for _args in args]
+        result_arr = [argsutils.run_action(ACTIONS, **_args) for _args in args]
     
     return result_arr
 
@@ -569,4 +519,4 @@ ACTIONS = {"concat": concat, "extract": extract, "transcode": transcode}
 ACTIONS_PARSER = {"concat": build_concat_parser(),
                   "extract": build_extract_parser(),
                   "transcode": build_transcode_parser(),
-                  "_": build_base_parser()}
+                  "_base": build_base_parser()}

@@ -20,11 +20,11 @@ class Dataset(metaclass=ABCMeta):
     def supported_formats(cls):
         return cls.SUPPORTED_FORMATS
 
-    @property
     @abstractmethod
-    def size(self):
+    def __len__(self):
         pass
 
+    @staticmethod
     @abstractmethod
-    def extract(self, *args, **kwargs):
+    def extract(dataset, dest, start=0, size=None):
         pass
