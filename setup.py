@@ -14,7 +14,10 @@ setup(
                       "pillow",
                       "numpy",
                       "pybenzinaparse @ git+https://github.com/satyaog/pybenzinaparse.git@0.2.2#egg=pybenzinaparse-0.2.2"],
-    extras_require={"h5py": ["h5py"]},
+    extras_require={"h5py": ["h5py"],
+                    "psnrhma": ["torch",
+                                "torchvision",
+                                "benzina[psnrhma] @ git+https://github.com/mila-iqia/benzina.git@feature/cache_optim"]},
     tests_require=["jug >= 2.1.1", "h5py", "pytest"],
     long_description="",
     data_files=[("tests", glob.glob("test_datasets/*", recursive=True))]

@@ -91,7 +91,8 @@ def test_concat():
     try:
         files_bytes = _prepare_concat_data(to_concat_filepaths, queue_dir,
                                            dest_dir)
-        concat_filepaths, _ = _run_tasks(concat(**vars(args)))[0]
+        total, concat_filepaths = _run_tasks(concat(**vars(args)))[0]
+        assert total == len(files_bytes)
         _test_concat(to_concat_filepaths, concat_filepaths, files_bytes,
                      args.dest)
 
@@ -121,16 +122,16 @@ def test_concat_index_completed_3():
     try:
         files_bytes = _prepare_concat_data(to_concat_filepaths[:3], queue_dir,
                                            dest_dir)
-        concat_filepaths, _ = _run_tasks(concat(**vars(args)))[0]
+        total, concat_filepaths = _run_tasks(concat(**vars(args)))[0]
+        assert total == len(files_bytes)
         _test_concat(to_concat_filepaths[:3], concat_filepaths, files_bytes,
                      args.dest)
 
         files_bytes += _prepare_concat_data(to_concat_filepaths, queue_dir,
                                             dest_dir)[3:]
-        concat_filepaths, remain_filepaths = \
-            _run_tasks(concat(**vars(args)))[0]
-        assert remain_filepaths == to_concat_filepaths[:3]
-        _test_concat(to_concat_filepaths, remain_filepaths + concat_filepaths,
+        total, concat_filepaths = _run_tasks(concat(**vars(args)))[0]
+        assert total == len(to_concat_filepaths)
+        _test_concat(to_concat_filepaths, concat_filepaths,
                      files_bytes, args.dest)
 
     finally:
@@ -150,7 +151,7 @@ def test_concat_no_queue():
     del args._action
 
     try:
-        assert _run_tasks(concat(**vars(args)))[0] == ([], [])
+        assert _run_tasks(concat(**vars(args)))[0] == (0, [])
 
         assert os.path.exists(os.path.join(src_dir, "upload/"))
         assert os.path.exists(os.path.join(src_dir, "queue/"))
@@ -183,7 +184,8 @@ def test_pybenzinaconcat_concat():
     try:
         files_bytes = _prepare_concat_data(to_concat_filepaths, queue_dir,
                                            dest_dir)
-        concat_filepaths, _ = _run_tasks(main(args, argv))[0]
+        total, concat_filepaths = _run_tasks(main(args, argv))[0]
+        assert total == len(files_bytes)
         _test_concat(to_concat_filepaths, concat_filepaths, files_bytes, dest)
 
     finally:
@@ -517,7 +519,8 @@ def test_pybenzinaconcat_trancode_chain_concat():
 
     try:
         files_bytes = _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir)
-        concat_filepaths, _ = _run_tasks(main(args, argv)[0])[0]
+        total, concat_filepaths = _run_tasks(main(args, argv)[0])[0]
+        assert total == len(files_bytes)
         assert len(concat_filepaths) == len(tmp_filepaths)
         with open(concat_file, "rb") as f:
             assert f.read() == b''.join(files_bytes)
@@ -1368,7 +1371,7 @@ def test_python_extract_batch_size_chain_transcode_chain_concat():
             assert f.read() == b''.join(files_bytes)
 
         assert len(glob.glob(os.path.join(transcode_tmp, '*'))) == 0
-        assert len(glob.glob(os.path.join(queue_dir, '*'))) == 0
+        assert len(glob.glob(os.path.join(queue_dir, '*'))) == 15
         assert len(glob.glob(os.path.join(upload_dir, '*'))) == 0
 
     finally:
