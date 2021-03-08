@@ -76,12 +76,11 @@ class Benzina(Dataset):
         self._fname_co = co
         self._fname_sz = sz
 
-        self._size = max(self._input_co.entry_count,
-                         self._input_sz.sample_count)
+        self._len = max(self._input_co.entry_count,
+                        self._input_sz.sample_count)
 
-    @property
-    def size(self):
-        return self._size
+    def __len__(self):
+        return self._len
 
     def get_input_locations(self, f):
         co, _ = _get_chunk_offset(f, self._input_co)
@@ -95,7 +94,7 @@ class Benzina(Dataset):
 
     @staticmethod
     @TaskGenerator
-    def extract(dataset, dest, start=0, size=512):
+    def extract(dataset, dest, start=0, size=None):
         extract(dataset, dest, start, size)
 
 
@@ -109,7 +108,7 @@ def extract(dataset, dest, start, size):
     
     with open(dataset.src, "rb") as ds_f:
         start = start
-        end = min(start + size, dataset.size) if size else dataset.size
+        end = min(start + size, len(dataset)) if size else len(dataset)
 
         input_co, input_sz = dataset.get_input_locations(ds_f)
         fname_co, fname_sz = dataset.get_fname_locations(ds_f)

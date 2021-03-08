@@ -23,18 +23,17 @@ class ImageNet(Dataset):
 
         if self._format == "hdf5":
             with h5py.File(self._src, 'r') as f:
-                self._size = len(f["encoded_images"])
+                self._len = len(f["encoded_images"])
         else:
             # 1281167 train images
-            self._size = 1281167
+            self._len = 1281167
 
-    @property
-    def size(self):
-        return self._size
+    def __len__(self):
+        return self._len
     
     @staticmethod
     @TaskGenerator
-    def extract(dataset, dest, start=0, size=512):
+    def extract(dataset, dest, start=0, size=None):
         if dataset.format == "hdf5":
             return extract_hdf5(dataset, dest, start, size)
         else:
@@ -50,11 +49,9 @@ def extract_hdf5(dataset, dest, start, size):
     extracted_filenames = []
 
     with h5py.File(dataset.src, 'r') as h5_f:
-        num_elements = len(h5_f["encoded_images"])
         num_targets = len(h5_f["targets"])
 
-        start = start
-        end = min(start + size, num_elements) if size else num_elements
+        end = min(start + size, len(dataset)) if size else len(dataset)
 
         for i in range(start, end):
             filename = h5_f["filenames"][i][0].decode("utf-8")
@@ -88,7 +85,7 @@ def extract_tar(dataset, dest, start, size):
     extracted_filenames = []
 
     index = 0
-    end = min(start + size, dataset.size) if size else dataset.size
+    end = min(start + size, len(dataset)) if size else len(dataset)
 
     with tarfile.open(dataset.src, 'r') as tar_f:
         for target_idx, member in enumerate(tar_f):
