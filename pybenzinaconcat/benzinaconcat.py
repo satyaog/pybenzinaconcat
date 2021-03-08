@@ -178,7 +178,6 @@ def to_bmp(input_path, dest_dir):
     return filename
 
 
-@TaskGenerator
 def transcode_img(input_path, dest_dir, clean_basename, mp4, ssh_remote=None,
                   tmp=None):
     upload_dir, queue_dir = _get_dir_hierarchy(dest_dir)
@@ -244,24 +243,7 @@ def transcode_img(input_path, dest_dir, clean_basename, mp4, ssh_remote=None,
 
 
 def try_transcode_task(task, input_path):
-    # Unlock to retry the task
-    if task.is_failed():
-        task.unlock()
-
-    # No other thread should own the lock
-    if not task.lock():
-        raise RuntimeError("Could not obtain transcoding task lock for image "
-                           "[{}]. Task's hash is [{}]"
-                           .format(input_path, task.hash()))
-
     try:
-        # If task has already executed, then the file has already been
-        # transcoded and queued
-        if task.can_load():
-            LOGGER.warning("Ignoring [{}] since it has already been transcoded"
-                           .format(input_path))
-            return not task.is_failed()
-
         task.run()
         if task.result is None:
             task.fail()
@@ -285,6 +267,8 @@ def transcode_batch(src, dest, exclude_files=tuple(), mp4=True,
 
     transcoded_imgs = []
     failed_imgs = []
+
+    # Transcode files sequentially
     for input_path in src:
         clean_basename = fnutils._get_clean_filepath(input_path, basename=True)
         if clean_basename in exclude_files:
@@ -292,29 +276,28 @@ def transcode_batch(src, dest, exclude_files=tuple(), mp4=True,
                         .format(input_path, clean_basename))
             continue
 
-        # Transcode files sequentially and only once
-        task = transcode_img(input_path, dest, clean_basename, mp4,
-                             ssh_remote=ssh_remote, tmp=tmp)
-
+        transcoded_path = None
         for i in range(2):
-            if try_transcode_task(task, input_path):
-                break
+            transcoded_path = transcode_img(input_path, dest, clean_basename,
+                                            mp4, ssh_remote=ssh_remote,
+                                            tmp=tmp)
+            break
         else:
             try:
                 # Transcode to BMP prior to H.265 to work around ffmpeg errors
                 bmp_path = to_bmp(input_path, tmp)
                 LOGGER.warning("Extra transcode step on [{}]: BMP written at "
                                "[{}]".format(input_path, bmp_path))
-                task = transcode_img(bmp_path, dest, clean_basename, mp4,
-                                     ssh_remote=ssh_remote, tmp=tmp)
-                try_transcode_task(task, input_path)
+                transcoded_path = transcode_img(bmp_path, dest, clean_basename,
+                                                mp4, ssh_remote=ssh_remote,
+                                                tmp=tmp)
             except FileNotFoundError:
                 pass
 
-        if task.is_failed():
+        if transcoded_path is None:
             failed_imgs.append(input_path)
         else:
-            transcoded_imgs.append(jug.value(task))
+            transcoded_imgs.append(transcoded_path)
 
     if failed_imgs:
         raise RuntimeError("Could not transcode all images [{}]"

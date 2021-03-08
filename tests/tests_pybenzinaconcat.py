@@ -298,9 +298,13 @@ def test_trancode_index_completed_3():
 
         files_bytes += _prepare_transcode_data(tmp_filepaths, tmp_dir,
                                                dest_dir)[3:]
-        args, _ = parse_args(["transcode", ','.join(tmp_filepaths), dest])
-        del args._action
-        transcode_filepaths = _run_tasks([transcode(**vars(args))])[0]
+        tasks = []
+        for i in range(0, len(tmp_filepaths), 3):
+            args, _ = parse_args(["transcode", ','.join(tmp_filepaths[i:i+3]), dest])
+            del args._action
+            tasks.append(transcode(**vars(args)))
+        transcode_filepaths = _run_tasks(tasks)
+        transcode_filepaths = [path for l in transcode_filepaths for path in l]
         assert len(transcode_filepaths) == len(tmp_filepaths)
         _test_trancode(tmp_filepaths, dest_dir, files_bytes, targets_bytes)
 
@@ -360,9 +364,13 @@ def test_trancode_target_data_completed_3():
         files_bytes += _prepare_transcode_data(tmp_filepaths, tmp_dir,
                                                dest_dir)[3:]
         targets_bytes = _prepare_transcode_target_data(tmp_filepaths)
-        args, _ = parse_args(["transcode", ','.join(tmp_filepaths), dest])
-        del args._action
-        transcode_filepaths = _run_tasks([transcode(**vars(args))])[0]
+        tasks = []
+        for i in range(0, len(tmp_filepaths), 3):
+            args, _ = parse_args(["transcode", ','.join(tmp_filepaths[i:i+3]), dest])
+            del args._action
+            tasks.append(transcode(**vars(args)))
+        transcode_filepaths = _run_tasks(tasks)
+        transcode_filepaths = [path for l in transcode_filepaths for path in l]
         assert len(transcode_filepaths) == len(tmp_filepaths)
         _test_trancode(tmp_filepaths, dest_dir, files_bytes, targets_bytes)
 
