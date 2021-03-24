@@ -179,8 +179,8 @@ def to_bmp(input_path, dest_dir):
     return filename
 
 
-def transcode_img(input_path, dest_dir, clean_basename, mp4, ssh_remote=None,
-                  tmp=None):
+def transcode_img(input_path, dest_dir, clean_basename, mp4, crf=10,
+                  ssh_remote=None, tmp=None):
     upload_dir, queue_dir = _get_dir_hierarchy(dest_dir)
     tmp_dir = tmp if tmp is not None else \
               os.path.dirname(input_path)
@@ -193,11 +193,11 @@ def transcode_img(input_path, dest_dir, clean_basename, mp4, ssh_remote=None,
     output_path = fnutils._make_transcoded_filepath(os.path.join(tmp_dir, filename))
     command = ["python", "-m", "pybenzinaconcat.image2mp4"] \
               if mp4 else ["image2heif"]
-    cmd_arguments = " --codec=h265 --tile=512:512:yuv420 --crf=10 " \
+    cmd_arguments = " --codec=h265 --tile=512:512:yuv420 --crf={crf} " \
                     "--output={dest} " \
                     "--primary --thumb --name={name} " \
                     "--item=path={src}" \
-                    .format(name=clean_basename,
+                    .format(name=clean_basename, crf=crf,
                             src=input_path, dest=output_path)
     if os.path.exists(target_path):
         cmd_arguments += " --hidden --name=target " \
@@ -262,7 +262,7 @@ def try_transcode_task(task, input_path):
 
 
 @TaskGenerator
-def transcode_batch(src, dest, exclude_files=tuple(), mp4=True,
+def transcode_batch(src, dest, exclude_files=tuple(), mp4=True, crf=10,
                     ssh_remote=None, tmp=None):
     exclude_files = set(exclude_files)
 
@@ -280,7 +280,7 @@ def transcode_batch(src, dest, exclude_files=tuple(), mp4=True,
         transcoded_path = None
         for i in range(2):
             transcoded_path = transcode_img(input_path, dest, clean_basename,
-                                            mp4, ssh_remote=ssh_remote,
+                                            mp4, crf, ssh_remote=ssh_remote,
                                             tmp=tmp)
             break
         else:
@@ -307,7 +307,7 @@ def transcode_batch(src, dest, exclude_files=tuple(), mp4=True,
     return transcoded_imgs
 
 
-def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
+def transcode(src, dest, excludes=None, mp4=True, crf=10, ssh_remote=None, tmp=None):
     """ Take a list of images and transcode them into a destination directory
 
     The suffix ".transcoded" will be appended to the file's base name
@@ -338,7 +338,7 @@ def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
 
     source = jug.utils.identity(source)
     exclude_files = jug.utils.identity(exclude_files)
-    return transcode_batch(source, dest, exclude_files, mp4, ssh_remote, tmp)
+    return transcode_batch(source, dest, exclude_files, mp4, crf, ssh_remote, tmp)
 
 
 def extract(src, dest, dataset_id, dataset_format, indices=0, size=None,
@@ -426,6 +426,8 @@ def build_transcode_parser():
                         help="a text file containing the list of files to exclude")
     parser.add_argument("--mp4", default=False, action="store_true",
                         help="use image2mp4 instead of image2heif")
+    parser.add_argument("--crf", default="10", type=int,
+                        help="constant rate factor to use for the transcoded image")
     parser.add_argument("--ssh-remote", metavar="REMOTE",
                         help="optional remote to use to transfer the transcoded "
                              "file to destination")

@@ -445,6 +445,33 @@ def test_trancode_excludes():
 
 
 @task_reset
+def test_trancode_crf():
+    """Test that files are transcoded to the correct location"""
+    dest = "output/dir/"
+    dest_dir = os.path.dirname(dest)
+    tmp_dir = "tmp/"
+
+    tmp_filepaths = []
+    for i in range(10):
+        tmp_filepaths.append(os.path.join(tmp_dir,
+                                          "file_{}_5mb.img".format(i)))
+
+    args, _ = parse_args(["transcode", ','.join(tmp_filepaths), dest,
+                          "--crf", "5"])
+    del args._action
+
+    try:
+        files_bytes = _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir)
+        targets_bytes = [b'' for _ in range(len(tmp_filepaths))]
+        transcode_filepaths = _run_tasks([transcode(**vars(args))])[0]
+        assert len(transcode_filepaths) == len(tmp_filepaths)
+        _test_trancode(tmp_filepaths, dest_dir, files_bytes, targets_bytes)
+
+    finally:
+        shutil.rmtree(".", ignore_errors=True)
+
+
+@task_reset
 def test_pybenzinaconcat_trancode():
     """Test that files are transcoded using the main entry point"""
     dest = "output/dir/"
@@ -1436,12 +1463,12 @@ def test_action_redirection():
                             "--batch-size", "5"]
 
     raw_extract_tinyimzip_argv = ["extract",
-                            "src_extract_zip",
-                            "dest_extract_zip",
-                            "tinyimagenet:zip",
-                            "--indices", "10",
-                            "--size", "15",
-                            "--batch-size", "5"]
+                                  "src_extract_zip",
+                                  "dest_extract_zip",
+                                  "tinyimagenet:zip",
+                                  "--indices", "10",
+                                  "--size", "15",
+                                  "--batch-size", "5"]
 
     raw_extract_tar_w_extra_argv = ["extract",
                                     "src_extract_tar",
