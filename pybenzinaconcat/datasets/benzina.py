@@ -1,7 +1,6 @@
 import os
 
 from bitstring import ConstBitStream
-from jug import TaskGenerator
 import numpy as np
 
 from pybenzinaparse import Parser
@@ -93,27 +92,23 @@ class Benzina(Dataset):
         return np.broadcast_arrays(co, sz)
 
     @staticmethod
-    @TaskGenerator
-    def extract(dataset, dest, start=0, size=None):
-        extract(dataset, dest, start, size)
+    def extract_batch(dataset, dest, indices):
+        extract(dataset, dest, indices)
 
 
-def extract(dataset, dest, start, size):
+def extract(dataset, dest, indices):
     """ Take a source mp4/bzna file and extract samples from it into a
     destination directory
     """
     extract_dir = dest
 
     extracted_filenames = []
-    
-    with open(dataset.src, "rb") as ds_f:
-        start = start
-        end = min(start + size, len(dataset)) if size else len(dataset)
 
+    with open(dataset.src, "rb") as ds_f:
         input_co, input_sz = dataset.get_input_locations(ds_f)
         fname_co, fname_sz = dataset.get_fname_locations(ds_f)
 
-        for i in range(start, end):
+        for i in indices:
             fname_offset, fname_size = fname_co[i], fname_sz[i]
             ds_f.seek(fname_offset)
             filename = ds_f.read(fname_size).rstrip(b'\0').decode("utf-8")

@@ -2,7 +2,6 @@ import os
 import zipfile
 from bisect import bisect_left
 
-from jug import TaskGenerator
 import numpy as np
 
 from pybenzinaconcat.utils import fnutils
@@ -116,12 +115,11 @@ class TinyImageNet(Dataset):
         return self._targets
     
     @staticmethod
-    @TaskGenerator
-    def extract(dataset, dest, start=0, size=None):
-        return extract_zip(dataset, dest, start, size)
+    def extract_batch(dataset, dest, indices):
+        return extract_zip(dataset, dest, indices)
 
 
-def extract_zip(dataset, dest, start, size):
+def extract_zip(dataset, dest, indices):
     """ Take a source Zip file and extract images from it into a destination
     directory
     """
@@ -130,11 +128,8 @@ def extract_zip(dataset, dest, start, size):
     extracted_filenames = []
 
     with zipfile.ZipFile(dataset.src, 'r') as zip_f:
-        start = start
-        end = min(start + size, len(dataset)) if size else len(dataset)
-
-        for i, index in enumerate(dataset.indices[start:end]):
-            i += start
+        for i in indices:
+            index = dataset.indices[i]
             fileinfo = zip_f.filelist[index]
             filename = os.path.basename(fileinfo.filename)
             filename = fnutils._make_index_filepath(filename, i)

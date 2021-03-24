@@ -5,7 +5,10 @@ import subprocess
 
 import jug
 from jug.task import recursive_dependencies
-from jug.tests.task_reset import task_reset
+from jug.tests.task_reset import task_reset_at_exit, task_reset
+# task_reset is a bit of a hack and needs task_reset_at_exit to be imported
+# the line below is only to prevent any complaints from code analysers
+task_reset_at_exit=task_reset_at_exit
 
 from pybenzinaconcat.utils.fnutils import FILENAME_TEMPLATE, _get_file_index, \
     _get_clean_filepath, _is_transcoded, _make_index_filepath, \
@@ -513,10 +516,9 @@ def test_jug_trancode():
         files_bytes = _prepare_transcode_data(tmp_filepaths, tmp_dir, dest_dir)
         targets_bytes = [b'' for _ in range(len(tmp_filepaths))]
 
-        subprocess.run(
+        assert subprocess.run(
             ["jug", "status", "--jugdir", "pybenzinaconcat.jugdir/", "--",
-             "../../pybenzinaconcat/__main__.py"] + args,
-            check=True)
+             "../../pybenzinaconcat/__main__.py"] + args).returncode == 0
 
         processes = [subprocess.Popen(
             ["jug", "execute", "--jugdir", "pybenzinaconcat.jugdir/", "--",
@@ -527,11 +529,10 @@ def test_jug_trancode():
             p.wait()
             assert p.returncode == 0
 
-        subprocess.run(
+        assert subprocess.run(
             ["jug", "status", "--jugdir", "pybenzinaconcat.jugdir/", "--",
-             "../../pybenzinaconcat/__main__.py"] + args,
-            check=True)
-        
+             "../../pybenzinaconcat/__main__.py"] + args).returncode > 0
+
         _test_trancode(tmp_filepaths, dest_dir, files_bytes, targets_bytes)
 
     finally:
@@ -861,14 +862,71 @@ def test_extract():
 
 
 @task_reset
-def test_extract_start_size():
+def test_extract_indices():
     """Test that the correct number of files are extracted"""
     src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
     dest = "output/dir/extract/"
     dest_dir = os.path.dirname(dest)
 
     args, _ = parse_args(["extract", src, dest, "imagenet:tar",
-                          "--start", "10", "--size", "15"])
+                          "--indices", ",".join([str(v)
+                                                 for v in range(10, 25)])])
+    del args._action
+
+    try:
+        extracted_filepaths = _run_tasks(extract(**vars(args)))[0]
+
+        queued_list = glob.glob(os.path.join(dest_dir, '*'))
+        queued_list.sort()
+        assert extracted_filepaths == \
+               list(filter(lambda fn: not fn.endswith(".target"), queued_list))
+        assert queued_list == \
+               ['output/dir/extract/000000000010.n01443537_2772.JPEG',
+                'output/dir/extract/000000000010.n01443537_2772.JPEG.target',
+                'output/dir/extract/000000000011.n01443537_1029.JPEG',
+                'output/dir/extract/000000000011.n01443537_1029.JPEG.target',
+                'output/dir/extract/000000000012.n01443537_1955.JPEG',
+                'output/dir/extract/000000000012.n01443537_1955.JPEG.target',
+                'output/dir/extract/000000000013.n01443537_962.JPEG',
+                'output/dir/extract/000000000013.n01443537_962.JPEG.target',
+                'output/dir/extract/000000000014.n01443537_2563.JPEG',
+                'output/dir/extract/000000000014.n01443537_2563.JPEG.target',
+                'output/dir/extract/000000000015.n01443537_3344.JPEG',
+                'output/dir/extract/000000000015.n01443537_3344.JPEG.target',
+                'output/dir/extract/000000000016.n01443537_3601.JPEG',
+                'output/dir/extract/000000000016.n01443537_3601.JPEG.target',
+                'output/dir/extract/000000000017.n01443537_2333.JPEG',
+                'output/dir/extract/000000000017.n01443537_2333.JPEG.target',
+                'output/dir/extract/000000000018.n01443537_801.JPEG',
+                'output/dir/extract/000000000018.n01443537_801.JPEG.target',
+                'output/dir/extract/000000000019.n01443537_2228.JPEG',
+                'output/dir/extract/000000000019.n01443537_2228.JPEG.target',
+                'output/dir/extract/000000000020.n01484850_4496.JPEG',
+                'output/dir/extract/000000000020.n01484850_4496.JPEG.target',
+                'output/dir/extract/000000000021.n01484850_2506.JPEG',
+                'output/dir/extract/000000000021.n01484850_2506.JPEG.target',
+                'output/dir/extract/000000000022.n01484850_17864.JPEG',
+                'output/dir/extract/000000000022.n01484850_17864.JPEG.target',
+                'output/dir/extract/000000000023.n01484850_4645.JPEG',
+                'output/dir/extract/000000000023.n01484850_4645.JPEG.target',
+                'output/dir/extract/000000000024.n01484850_22221.JPEG',
+                'output/dir/extract/000000000024.n01484850_22221.JPEG.target']
+        args.size = 5
+        assert _run_tasks(extract(**vars(args)))[0] == extracted_filepaths
+
+    finally:
+        shutil.rmtree(".", ignore_errors=True)
+
+
+@task_reset
+def test_extract_int_indices_size():
+    """Test that the correct number of files are extracted"""
+    src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
+    dest = "output/dir/extract/"
+    dest_dir = os.path.dirname(dest)
+
+    args, _ = parse_args(["extract", src, dest, "imagenet:tar",
+                          "--indices", "10", "--size", "15"])
     del args._action
 
     try:
@@ -915,14 +973,14 @@ def test_extract_start_size():
 
 
 @task_reset
-def test_extract_start_batch_size():
+def test_extract_int_indices_batch_size():
     """Test that the correct number of files are extracted"""
     src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
     dest = "output/dir/extract/"
     dest_dir = os.path.dirname(dest)
 
     args, _ = parse_args(["extract", src, dest, "imagenet:tar",
-                          "--start", "10", "--size", "15",
+                          "--indices", "10", "--size", "15",
                           "--batch-size", "5"])
     del args._action
 
@@ -991,7 +1049,7 @@ def test_pybenzinaconcat_extract_chain_transcode():
     transcode_tmp = "tmp/"
 
     args, argv = parse_args(["extract", src, dest, "imagenet:tar",
-                             "--start", "10", "--size", "15",
+                             "--indices", "10", "--size", "15",
                              "--transcode", transcode_dest,
                              "--tmp", transcode_tmp])
 
@@ -1047,7 +1105,7 @@ def test_pybenzinaconcat_extract_chain_transcode_mp4():
     transcode_tmp = "tmp/"
 
     args, argv = parse_args(["extract", src, dest, "imagenet:tar",
-                             "--start", "10", "--size", "15",
+                             "--indices", "10", "--size", "15",
                              "--transcode", transcode_dest, "--mp4",
                              "--tmp", transcode_tmp])
 
@@ -1132,7 +1190,7 @@ def test_python_extract_batch_size_chain_transcode_mp4():
     queue_dir = os.path.join(transcode_dest, "queue")
     transcode_tmp = "tmp/"
 
-    args = ["--", "extract", src, dest, "imagenet:tar", "--start", "10",
+    args = ["--", "extract", src, dest, "imagenet:tar", "--indices", "10",
             "--size", "15",
             "--transcode", transcode_dest, "--mp4", "--tmp", transcode_tmp]
 
@@ -1223,7 +1281,7 @@ def test_python_extract_batch_size_chain_transcode_chain_concat():
 
     concat_file = "output/dir/concat.bzna"
 
-    args = ["--", "extract", src, dest, "imagenet:tar", "--start", "10",
+    args = ["--", "extract", src, dest, "imagenet:tar", "--indices", "10",
             "--size", "15", "--batch-size", "5",
             "--transcode", transcode_dest, "--tmp", transcode_tmp,
             "--concat", concat_file]
@@ -1365,7 +1423,7 @@ def test_action_redirection():
                              "src_extract_hdf5",
                              "dest_extract_hdf5",
                              "imagenet:hdf5",
-                             "--start", "10",
+                             "--indices", "10",
                              "--size", "15",
                              "--batch-size", "5"]
 
@@ -1373,7 +1431,7 @@ def test_action_redirection():
                             "src_extract_tar",
                             "dest_extract_tar",
                             "imagenet:tar",
-                            "--start", "10",
+                            "--indices", "10",
                             "--size", "15",
                             "--batch-size", "5"]
 
@@ -1381,7 +1439,7 @@ def test_action_redirection():
                             "src_extract_zip",
                             "dest_extract_zip",
                             "tinyimagenet:zip",
-                            "--start", "10",
+                            "--indices", "10",
                             "--size", "15",
                             "--batch-size", "5"]
 
@@ -1389,7 +1447,7 @@ def test_action_redirection():
                                     "src_extract_tar",
                                     "dest_extract_tar",
                                     "imagenet:tar",
-                                    "--start", "10",
+                                    "--indices", "10",
                                     "--size", "15",
                                     "--batch-size", "5",
                                     "--transcode",
@@ -1434,7 +1492,7 @@ def test_action_redirection():
     assert args.dataset_format == "hdf5"
     assert args.src == "src_extract_hdf5"
     assert args.dest == "dest_extract_hdf5"
-    assert args.start == 10
+    assert args.indices == 10
     assert args.size == 15
     assert args.batch_size == 5
     assert len(argv) == 0
@@ -1446,7 +1504,7 @@ def test_action_redirection():
     assert args.dataset_format == "tar"
     assert args.src == "src_extract_tar"
     assert args.dest == "dest_extract_tar"
-    assert args.start == 10
+    assert args.indices == 10
     assert args.size == 15
     assert args.batch_size == 5
     assert len(argv) == 0
@@ -1458,7 +1516,7 @@ def test_action_redirection():
     assert args.dataset_format == "zip"
     assert args.src == "src_extract_zip"
     assert args.dest == "dest_extract_zip"
-    assert args.start == 10
+    assert args.indices == 10
     assert args.size == 15
     assert args.batch_size == 5
     assert len(argv) == 0
@@ -1471,7 +1529,7 @@ def test_action_redirection():
     assert args.dataset_format == "tar"
     assert args.src == "src_extract_tar"
     assert args.dest == "dest_extract_tar"
-    assert args.start == 10
+    assert args.indices == 10
     assert args.size == 15
     assert args.batch_size == 5
     assert transcode_args._action == "transcode"

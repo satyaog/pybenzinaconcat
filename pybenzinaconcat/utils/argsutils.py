@@ -11,20 +11,28 @@ class ChainAction(argparse.Action):
         setattr(namespace, self.dest, [action] + values)
 
 
+class CheckFileType(argparse.FileType):
+    def __call__(self, string):
+        f = super(CheckFileType, self).__call__(string)
+        f.close()
+        return FileDesc(f.name, f.mode)
+
+
 class DatasetAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         dataset_id, ar_format = values.split(':')
         dest = self.dest.lstrip('_')
         setattr(namespace, dest + "_id", dataset_id)
         setattr(namespace, dest + "_format", ar_format)
-        delattr(namespace, self.dest) 
+        delattr(namespace, self.dest)
 
 
-class CheckFileType(argparse.FileType):
-    def __call__(self, string):
-        f = super(CheckFileType, self).__call__(string)
-        f.close()
-        return FileDesc(f.name, f.mode)
+class IntOrList(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        values = [int(v) for v in values.split(',')]
+        if len(values) == 1:
+            values = values[0]
+        setattr(namespace, self.dest, values)
 
 
 def parse_args(actions_parser, argv=None):

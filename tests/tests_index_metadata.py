@@ -7,7 +7,10 @@ import subprocess
 from bitstring import ConstBitStream
 import jug
 from jug.task import recursive_dependencies
-from jug.tests.task_reset import task_reset
+from jug.tests.task_reset import task_reset_at_exit, task_reset
+# task_reset is a bit of a hack and needs task_reset_at_exit to be imported
+# the line below is only to prevent any complaints from code analysers
+task_reset_at_exit=task_reset_at_exit
 
 from pybenzinaparse import Parser
 from pybenzinaparse.utils import get_trak_sample_bytes, find_boxes
@@ -58,7 +61,7 @@ def _create_container():
         os.makedirs(queue_dir)
 
     extract_args = ["extract", src, extract_dest, "imagenet:tar",
-                    "--start", "5", "--size", "10", "--batch-size", "5"]
+                    "--indices", "5", "--size", "10", "--batch-size", "5"]
     transcode_args = ["--transcode", transcode_dest, "--mp4",
                       "--tmp", transcode_tmp]
 

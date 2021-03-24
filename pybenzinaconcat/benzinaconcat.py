@@ -5,6 +5,7 @@ import importlib.util
 import logging
 import os
 import subprocess
+from collections.abc import Iterable
 
 import jug
 import jug.utils
@@ -340,7 +341,7 @@ def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
     return transcode_batch(source, dest, exclude_files, mp4, ssh_remote, tmp)
 
 
-def extract(src, dest, dataset_id, dataset_format, start=0, size=None,
+def extract(src, dest, dataset_id, dataset_format, indices=0, size=None,
             batch_size=1024):
     """ Take a source archive file and extract images from it into a
     destination directory.
@@ -356,13 +357,19 @@ def extract(src, dest, dataset_id, dataset_format, start=0, size=None,
     if size is None:
         size = len(dataset)
 
+    if isinstance(indices, Iterable) and len(indices) == 1:
+        indices = indices[0]
+    elif isinstance(indices, Iterable):
+        batch_size = None
+        size = None
+
     if size and batch_size:
         batch_size = min(size, batch_size)
         processes_kwargs = []
-        for start in range(start, start + size, batch_size):
+        for indices in range(indices, indices + size, batch_size):
             process_kwargs = copy.deepcopy(kwargs)
             del process_kwargs["batch_size"]
-            process_kwargs["start"] = start
+            process_kwargs["indices"] = indices
             process_kwargs["size"] = batch_size
             processes_kwargs.append(process_kwargs)
     else:
@@ -448,8 +455,10 @@ def build_extract_parser():
                         choices=list(datasets.iter_datasets_formats()),
                         action=argsutils.DatasetAction,
                         help="dataset id and format")
-    parser.add_argument("--start", metavar="IDX", default=0, type=int,
-                        help="the start element index to extract from source")
+    parser.add_argument("--indices", metavar="IDX", default=0,
+                        action=argsutils.IntOrList,
+                        help="the start element index or comma-separated "
+                             "indices to extract from source")
     parser.add_argument("--size", default=None, metavar="NUM", type=int,
                         help="the number of elements to extract from source")
     parser.add_argument("--batch-size", default=1024, metavar="NUM", type=int,
