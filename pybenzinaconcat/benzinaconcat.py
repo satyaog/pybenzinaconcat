@@ -56,7 +56,8 @@ def _make_concat_dirs(root, ssh_remote=None):
 
 def _concat_file(concat_f, filepath):
     # Concat file only once
-    task = jug.utils.identity("concat_file:" + filepath)
+    task = jug.utils.identity("concat_file:{}; part:{}".format(concat_f.name,
+                                                               filepath))
 
     # No other thread should own the lock
     if not task.lock():
@@ -162,7 +163,9 @@ def concat(src, dest):
     return result[1:]
 
 
-def to_bmp(input_path, dest_dir):
+def to_bmp(input_path, dest_dir=None):
+    dest_dir = dest_dir if dest_dir is not None else \
+               os.path.dirname(input_path)
     im = Image.open(input_path, 'r')
     filename = os.path.basename(input_path)
     filename = os.path.join(dest_dir, os.path.splitext(filename)[0] + ".BMP")
