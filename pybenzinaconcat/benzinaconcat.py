@@ -160,12 +160,10 @@ def to_bmp(input_path, dest_dir=None):
     if os.path.isfile(target_path):
         # Move target close to the input for it to be picked up in the
         # transcoding process
-        with open(target_path, "rb") as f:
-            target = f.read()
-        target_filename = fnutils._make_target_filepath(filename)
-        with open(target_filename, "wb") as f:
-            f.write(target)
-    im.save(filename, "BMP")
+        with open(target_path, "rb") as f_in, \
+                open(fnutils._make_target_filepath(filename), "wb") as f_out:
+            f_out.write(f_in.read())
+    im.convert("RGB").save(filename, "BMP")
     return filename
 
 
@@ -235,7 +233,7 @@ def transcode_img(input_path, dest_dir, clean_basename, mp4, crf=10,
 
 @TaskGenerator
 def transcode_batch(src, dest, exclude_files=tuple(), mp4=True, crf=10,
-                    ssh_remote=None, tmp=None):
+                    force_bmp=False, ssh_remote=None, tmp=None):
     exclude_files = set(exclude_files)
 
     transcoded_imgs = []
@@ -251,6 +249,10 @@ def transcode_batch(src, dest, exclude_files=tuple(), mp4=True, crf=10,
 
         transcoded_path = None
         for i in range(2):
+            # Skip to bmp extra step
+            if force_bmp:
+                continue
+
             transcoded_path = transcode_img(input_path, dest, clean_basename,
                                             mp4, crf, ssh_remote=ssh_remote,
                                             tmp=tmp)
@@ -263,7 +265,7 @@ def transcode_batch(src, dest, exclude_files=tuple(), mp4=True, crf=10,
                 LOGGER.warning("Extra transcode step on [{}]: BMP written at "
                                "[{}]".format(input_path, bmp_path))
                 transcoded_path = transcode_img(bmp_path, dest, clean_basename,
-                                                mp4, ssh_remote=ssh_remote,
+                                                mp4, crf, ssh_remote=ssh_remote,
                                                 tmp=tmp)
             except FileNotFoundError:
                 pass
@@ -280,7 +282,8 @@ def transcode_batch(src, dest, exclude_files=tuple(), mp4=True, crf=10,
     return transcoded_imgs
 
 
-def transcode(src, dest, excludes=None, mp4=True, crf=10, ssh_remote=None, tmp=None):
+def transcode(src, dest, excludes=None, mp4=False, crf=10, force_bmp=False,
+              ssh_remote=None, tmp=None):
     """ Take a list of images and transcode them into a destination directory
 
     The suffix ".transcoded" will be appended to the file's base name
@@ -311,7 +314,7 @@ def transcode(src, dest, excludes=None, mp4=True, crf=10, ssh_remote=None, tmp=N
 
     source = jug.utils.identity(source)
     exclude_files = jug.utils.identity(exclude_files)
-    return transcode_batch(source, dest, exclude_files, mp4, crf, ssh_remote, tmp)
+    return transcode_batch(source, dest, exclude_files, mp4, crf, force_bmp, ssh_remote, tmp)
 
 
 def extract(src, dest, dataset_id, dataset_format, indices=0, size=None,
@@ -401,6 +404,8 @@ def build_transcode_parser():
                         help="use image2mp4 instead of image2heif")
     parser.add_argument("--crf", default="10", type=int,
                         help="constant rate factor to use for the transcoded image")
+    parser.add_argument("--force-bmp", default=False, action="store_true",
+                        help="force transcoding to bmp prior transcoding to h265")
     parser.add_argument("--ssh-remote", metavar="REMOTE",
                         help="optional remote to use to transfer the transcoded "
                              "file to destination")
