@@ -1294,6 +1294,95 @@ def test_python_extract_batch_size_chain_transcode_mp4():
         shutil.rmtree(".", ignore_errors=True)
 
 
+def test_python_extract_batch_size_chain_transcode_mp4_force_bmp():
+    """Test that files are extracted then transcoded to mop4 using python"""
+    src = os.path.join(DATA_DIR, "dev_im_net/dev_im_net.tar")
+    dest = "output/dir/extract/"
+
+    transcode_dest = "output/dir/"
+    upload_dir = os.path.join(transcode_dest, "upload")
+    queue_dir = os.path.join(transcode_dest, "queue")
+    transcode_tmp = "tmp/"
+
+    args = ["--", "extract", src, dest, "imagenet:tar", "--indices", "10",
+            "--size", "15",
+            "--transcode", transcode_dest, "--mp4", "--force-bmp",
+            "--tmp", transcode_tmp]
+
+    try:
+        if upload_dir and not os.path.exists(upload_dir):
+            os.makedirs(upload_dir)
+        if queue_dir and not os.path.exists(queue_dir):
+            os.makedirs(queue_dir)
+        if transcode_tmp and not os.path.exists(transcode_tmp):
+            os.makedirs(transcode_tmp)
+
+        processes = [subprocess.Popen(["python3", "../../pybenzinaconcat"] +
+                                      args) for _ in range(4)]
+
+        for p in processes:
+            p.wait()
+            assert p.returncode == 0
+
+        queued_list = glob.glob(os.path.join(queue_dir, '*'))
+        queued_list.sort()
+        assert queued_list == \
+               ['output/dir/queue/000000000010.n01443537_2772.BMP.transcoded',
+                'output/dir/queue/000000000011.n01443537_1029.BMP.transcoded',
+                'output/dir/queue/000000000012.n01443537_1955.BMP.transcoded',
+                'output/dir/queue/000000000013.n01443537_962.BMP.transcoded',
+                'output/dir/queue/000000000014.n01443537_2563.BMP.transcoded',
+                'output/dir/queue/000000000015.n01443537_3344.BMP.transcoded',
+                'output/dir/queue/000000000016.n01443537_3601.BMP.transcoded',
+                'output/dir/queue/000000000017.n01443537_2333.BMP.transcoded',
+                'output/dir/queue/000000000018.n01443537_801.BMP.transcoded',
+                'output/dir/queue/000000000019.n01443537_2228.BMP.transcoded',
+                'output/dir/queue/000000000020.n01484850_4496.BMP.transcoded',
+                'output/dir/queue/000000000021.n01484850_2506.BMP.transcoded',
+                'output/dir/queue/000000000022.n01484850_17864.BMP.transcoded',
+                'output/dir/queue/000000000023.n01484850_4645.BMP.transcoded',
+                'output/dir/queue/000000000024.n01484850_22221.BMP.transcoded']
+
+        bmp_list = glob.glob(os.path.join(transcode_tmp, '*'))
+        bmp_list.sort()
+        assert bmp_list == \
+               ['tmp/000000000010.n01443537_2772.BMP',
+                'tmp/000000000010.n01443537_2772.BMP.target',
+                'tmp/000000000011.n01443537_1029.BMP',
+                'tmp/000000000011.n01443537_1029.BMP.target',
+                'tmp/000000000012.n01443537_1955.BMP',
+                'tmp/000000000012.n01443537_1955.BMP.target',
+                'tmp/000000000013.n01443537_962.BMP',
+                'tmp/000000000013.n01443537_962.BMP.target',
+                'tmp/000000000014.n01443537_2563.BMP',
+                'tmp/000000000014.n01443537_2563.BMP.target',
+                'tmp/000000000015.n01443537_3344.BMP',
+                'tmp/000000000015.n01443537_3344.BMP.target',
+                'tmp/000000000016.n01443537_3601.BMP',
+                'tmp/000000000016.n01443537_3601.BMP.target',
+                'tmp/000000000017.n01443537_2333.BMP',
+                'tmp/000000000017.n01443537_2333.BMP.target',
+                'tmp/000000000018.n01443537_801.BMP',
+                'tmp/000000000018.n01443537_801.BMP.target',
+                'tmp/000000000019.n01443537_2228.BMP',
+                'tmp/000000000019.n01443537_2228.BMP.target',
+                'tmp/000000000020.n01484850_4496.BMP',
+                'tmp/000000000020.n01484850_4496.BMP.target',
+                'tmp/000000000021.n01484850_2506.BMP',
+                'tmp/000000000021.n01484850_2506.BMP.target',
+                'tmp/000000000022.n01484850_17864.BMP',
+                'tmp/000000000022.n01484850_17864.BMP.target',
+                'tmp/000000000023.n01484850_4645.BMP',
+                'tmp/000000000023.n01484850_4645.BMP.target',
+                'tmp/000000000024.n01484850_22221.BMP',
+                'tmp/000000000024.n01484850_22221.BMP.target']
+
+        assert len(glob.glob(os.path.join(upload_dir, '*'))) == 0
+
+    finally:
+        shutil.rmtree(".", ignore_errors=True)
+
+
 def test_python_extract_batch_size_chain_transcode_chain_concat():
     """Test that files are extracted then transcoded and finally concatenated
     sequentially using python"""
