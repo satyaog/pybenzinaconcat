@@ -71,7 +71,7 @@ def _concat_file(concat_f, filepath):
         if task.can_load():
             LOGGER.warning("Ignoring [{}] since it has already been "
                            "concatenated".format(filepath))
-            return None
+            return filepath
 
         task.run()
         with open(filepath, "rb") as f:
@@ -84,18 +84,15 @@ def _concat_file(concat_f, filepath):
         if not task.is_failed():
             task.unlock()
 
-    os.remove(filepath)
     return filepath
 
 
 @TaskGenerator
 def _concat_batch(batch, last_batch, dest):
-    last_batch_file_idx = -1
+    total = 0
 
     if last_batch is not None:
-        last_concat_files, _ = last_batch
-        if last_concat_files:
-            last_batch_file_idx = fnutils._get_file_index(last_concat_files[-1])
+        total, _ = last_batch
 
     # "Lock" concat file using jug
     task = jug.utils.identity("concat_file:" + dest)
@@ -111,25 +108,15 @@ def _concat_batch(batch, last_batch, dest):
     try:
         with open(dest, "ab") as concat_f:
             for i, filepath in enumerate(batch):
-                # Concat files sequentially
-                file_index = fnutils._get_file_index(filepath)
-                if file_index is not None:
-                    assert fnutils._get_file_index(filepath) > last_batch_file_idx
-                    last_batch_file_idx = fnutils._get_file_index(filepath)
-
-                if _concat_file(concat_f, filepath) is not None:
-                    concatenated_files.append(filepath)
+                concatenated_files.append(_concat_file(concat_f, filepath))
 
         if len(concatenated_files) == 0 and os.stat(dest).st_size == 0:
             os.remove(dest)
     finally:
         task.unlock()
 
-    concatenated_set = set(concatenated_files)
-
     print("\n".join(concatenated_files))
-    return concatenated_files, \
-           [f for f in batch if f not in concatenated_set]
+    return total + len(concatenated_files), concatenated_files
 
 
 def concat(src, dest):
@@ -246,24 +233,6 @@ def transcode_img(input_path, dest_dir, clean_basename, mp4, crf=10,
     return queued_path
 
 
-def try_transcode_task(task, input_path):
-    try:
-        task.run()
-        if task.result is None:
-            task.fail()
-            task.invalidate()
-            return False
-    except Exception:
-        task.fail()
-        task.invalidate()
-        raise
-    finally:
-        if not task.is_failed():
-            task.unlock()
-
-    return not task.is_failed()
-
-
 @TaskGenerator
 def transcode_batch(src, dest, exclude_files=tuple(), mp4=True, crf=10,
                     ssh_remote=None, tmp=None):
@@ -285,7 +254,8 @@ def transcode_batch(src, dest, exclude_files=tuple(), mp4=True, crf=10,
             transcoded_path = transcode_img(input_path, dest, clean_basename,
                                             mp4, crf, ssh_remote=ssh_remote,
                                             tmp=tmp)
-            break
+            if transcoded_path:
+                break
         else:
             try:
                 # Transcode to BMP prior to H.265 to work around ffmpeg errors
