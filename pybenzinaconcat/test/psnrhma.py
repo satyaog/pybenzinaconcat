@@ -31,8 +31,8 @@ class BenzinaDataset(bz.Dataset):
 
 class PilResizeMaxSide(transforms.Resize):
     def __call__(self, img):
-        return functional.resize(img, min(get_image_resize(img.size,
-                                                           self.size)),
+        resize = get_image_resize(img.size, self.size)
+        return functional.resize(img, [resize[1], resize[0]],
                                  self.interpolation)
 
     forward = __call__
@@ -70,9 +70,6 @@ class PilDataset(torch.utils.data.Dataset):
         img_shape = get_image_resize(image.size, self._edge_size)
         if self.transform is not None:
             image = self.transform(image)
-        if max(img_shape) > max(image.shape):
-            scale = max(image.shape) / max(img_shape)
-            img_shape = (int(img_shape[0] * scale), int(img_shape[1] * scale))
         return image, img_shape
 
     @property
@@ -88,16 +85,10 @@ class PilDataset(torch.utils.data.Dataset):
 
 def get_image_resize(img_size, edge_size):
     if max(img_size) > edge_size:
-        small_side = min(img_size) * edge_size // max(img_size)
-    elif img_size[0] < img_size[1]:
-        small_side = min(img_size[0], edge_size)
+        scale = edge_size / max(img_size)
     else:
-        small_side = min(img_size[1], edge_size)
-
-    if img_size[0] < img_size[1]:
-        return small_side, img_size[1] * small_side // img_size[0]
-    else:
-        return img_size[0] * small_side // img_size[1], small_side
+        scale = 1
+    return int(img_size[0] * scale), int(img_size[1] * scale)
 
 
 def iter_benzina(dataset, shape, start, size, batch_size=8):
