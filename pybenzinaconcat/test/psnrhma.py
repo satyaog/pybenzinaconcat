@@ -149,7 +149,7 @@ def array_flatten(array):
 
 
 @TaskGenerator
-def get_imagenet_dataset(path, shape):
+def get_pil_dataset(path, shape):
     return PilDataset(path, shape)
 
 
@@ -160,7 +160,7 @@ def get_benzina_dataset(path):
 
 def psnrhma(reference, corrupted, shape, threshold, eps, start=0, size=None,
             batch_size=1024):
-    reference_jug = get_imagenet_dataset(reference, shape)
+    reference_jug = get_pil_dataset(reference, shape)
     corrupted_jug = get_benzina_dataset(corrupted)
     if not reference_jug.can_load():
         reference_jug.run()
