@@ -11,7 +11,7 @@ from jug.tests.task_reset import task_reset_at_exit, task_reset
 task_reset_at_exit=task_reset_at_exit
 
 from pybenzinaconcat.utils.fnutils import FILENAME_TEMPLATE, _get_file_index, \
-    _get_clean_filepath, _is_transcoded, _make_index_filepath, \
+    get_clean_filepath, _is_transcoded, _make_index_filepath, \
     _make_transcoded_filepath
 from pybenzinaconcat.benzinaconcat import concat, extract, transcode, \
     parse_args, main
@@ -1479,16 +1479,16 @@ def test__get_clean_filepath():
                                         index=12)
     splitted_filename = filename.split('.')
 
-    assert _get_clean_filepath(filename) == "some_filename.extension"
-    assert _get_clean_filepath('.'.join(splitted_filename[:-1])) == \
+    assert get_clean_filepath(filename) == "some_filename.extension"
+    assert get_clean_filepath('.'.join(splitted_filename[:-1])) == \
            "some_filename.extension"
-    assert _get_clean_filepath('.'.join(splitted_filename[1:])) == \
+    assert get_clean_filepath('.'.join(splitted_filename[1:])) == \
            "some_filename.extension"
-    assert _get_clean_filepath('.'.join(splitted_filename[1:-1])) == \
+    assert get_clean_filepath('.'.join(splitted_filename[1:-1])) == \
            "some_filename.extension"
-    assert _get_clean_filepath("dir/dir/" + filename, basename=True) == \
+    assert get_clean_filepath("dir/dir/" + filename, basename=True) == \
            "some_filename.extension"
-    assert _get_clean_filepath("dir/dir/" + filename) == \
+    assert get_clean_filepath("dir/dir/" + filename) == \
            "dir/dir/some_filename.extension"
 
 

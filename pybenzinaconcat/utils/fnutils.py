@@ -18,7 +18,7 @@ def _get_file_index(filepath):
     return None
 
 
-def _get_clean_filepath(filepath, basename=False):
+def get_clean_filepath(filepath, basename=False):
     if isinstance(filepath, str):
         dirname = os.path.dirname(filepath)
         splitted_filename = os.path.basename(filepath).split('.')

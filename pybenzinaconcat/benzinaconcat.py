@@ -272,7 +272,7 @@ def transcode_batch(src, dest, exclude_files=tuple(), mp4=True, crf=10,
 
     # Transcode files sequentially
     for input_path in src:
-        clean_basename = fnutils._get_clean_filepath(input_path, basename=True)
+        clean_basename = fnutils.get_clean_filepath(input_path, basename=True)
         if clean_basename in exclude_files:
             LOGGER.info("Ignoring [{}] since [{}] is excluded"
                         .format(input_path, clean_basename))
@@ -336,8 +336,8 @@ def transcode(src, dest, excludes=None, mp4=False, crf=10, force_bmp=False,
             exclude_files = f.read().split('\n')
 
         for i, exclude in enumerate(exclude_files):
-            exclude_files[i] = fnutils._get_clean_filepath(exclude,
-                                                           basename=True)
+            exclude_files[i] = fnutils.get_clean_filepath(exclude,
+                                                          basename=True)
         exclude_files.sort()
     else:
         exclude_files = []
