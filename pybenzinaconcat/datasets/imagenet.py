@@ -2,8 +2,6 @@ import importlib.util
 import os
 import tarfile
 
-from jug import TaskGenerator
-
 from pybenzinaconcat.utils import fnutils
 from pybenzinaconcat.datasets import Dataset
 
@@ -23,25 +21,23 @@ class ImageNet(Dataset):
 
         if self._format == "hdf5":
             with h5py.File(self._src, 'r') as f:
-                self._size = len(f["encoded_images"])
+                self._len = len(f["encoded_images"])
         else:
             # 1281167 train images
-            self._size = 1281167
+            self._len = 1281167
 
-    @property
-    def size(self):
-        return self._size
+    def __len__(self):
+        return self._len
     
     @staticmethod
-    @TaskGenerator
-    def extract(dataset, dest, start=0, size=512):
+    def extract_batch(dataset, dest, indices):
         if dataset.format == "hdf5":
-            return extract_hdf5(dataset, dest, start, size)
+            return extract_hdf5(dataset, dest, indices)
         else:
-            return extract_tar(dataset, dest, start, size)
+            return extract_tar(dataset, dest, indices)
 
 
-def extract_hdf5(dataset, dest, start, size):
+def extract_hdf5(dataset, dest, indices):
     """ Take a source HDF5 file and extract images from it into a destination
     directory
     """
@@ -50,13 +46,9 @@ def extract_hdf5(dataset, dest, start, size):
     extracted_filenames = []
 
     with h5py.File(dataset.src, 'r') as h5_f:
-        num_elements = len(h5_f["encoded_images"])
         num_targets = len(h5_f["targets"])
 
-        start = start
-        end = min(start + size, num_elements) if size else num_elements
-
-        for i in range(start, end):
+        for i in indices:
             filename = h5_f["filenames"][i][0].decode("utf-8")
             extract_filepath = os.path.join(extract_dir, filename)
             extract_filepath = fnutils._make_index_filepath(extract_filepath,
@@ -79,7 +71,7 @@ def extract_hdf5(dataset, dest, start, size):
     return extracted_filenames
 
 
-def extract_tar(dataset, dest, start, size):
+def extract_tar(dataset, dest, indices):
     """ Take a source tar file and extract images from it into a destination
     directory
     """
@@ -87,20 +79,21 @@ def extract_tar(dataset, dest, start, size):
 
     extracted_filenames = []
 
+    indices = set(indices)
     index = 0
-    end = min(start + size, dataset.size) if size else dataset.size
+    end = max(indices)
 
     with tarfile.open(dataset.src, 'r') as tar_f:
         for target_idx, member in enumerate(tar_f):
-            if index >= end:
+            if index > end:
                 break
             sub_tar = tar_f.extractfile(member)
             file_sub_tar = tarfile.open(fileobj=sub_tar, mode="r")
             for sub_member in file_sub_tar:
-                if index >= end:
+                if index > end:
                     break
 
-                if index >= start:
+                if index in indices:
                     filename = sub_member.name
                     filename = fnutils._make_index_filepath(filename, index)
                     extract_filepath = os.path.join(extract_dir, filename)

@@ -1,4 +1,7 @@
 from abc import ABCMeta, abstractmethod
+from collections.abc import Iterable
+
+from jug import TaskGenerator
 
 
 class Dataset(metaclass=ABCMeta):
@@ -20,11 +23,20 @@ class Dataset(metaclass=ABCMeta):
     def supported_formats(cls):
         return cls.SUPPORTED_FORMATS
 
-    @property
     @abstractmethod
-    def size(self):
+    def __len__(self):
         pass
 
+    @classmethod
+    @TaskGenerator
+    def extract(cls, dataset, dest, indices=0, size=None):
+        if not isinstance(indices, Iterable):
+            index = indices
+            end = min(index + size, len(dataset)) if size else len(dataset)
+            indices = range(index, end)
+        return cls.extract_batch(dataset, dest, indices)
+
+    @staticmethod
     @abstractmethod
-    def extract(self, *args, **kwargs):
+    def extract_batch(dataset, dest, indices):
         pass

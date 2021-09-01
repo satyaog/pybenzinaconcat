@@ -5,8 +5,7 @@ import importlib.util
 import logging
 import os
 import subprocess
-import sys
-from collections import namedtuple
+from collections.abc import Iterable
 
 import jug
 import jug.utils
@@ -14,7 +13,7 @@ from jug import TaskGenerator
 from PIL import Image
 
 import pybenzinaconcat.datasets as datasets
-from pybenzinaconcat.utils import fnutils
+from pybenzinaconcat.utils import argsutils, fnutils
 
 h5py_spec = importlib.util.find_spec("h5py")
 is_h5py_installed = h5py_spec is not None
@@ -57,7 +56,8 @@ def _make_concat_dirs(root, ssh_remote=None):
 
 def _concat_file(concat_f, filepath):
     # Concat file only once
-    task = jug.utils.identity("concat_file:" + filepath)
+    task = jug.utils.identity("concat_file:{}; part:{}".format(concat_f.name,
+                                                               filepath))
 
     # No other thread should own the lock
     if not task.lock():
@@ -163,24 +163,25 @@ def concat(src, dest):
     return result[1:]
 
 
-def to_bmp(input_path, dest_dir):
+def to_bmp(input_path, dest_dir=None):
+    dest_dir = dest_dir if dest_dir is not None else \
+               os.path.dirname(input_path)
     im = Image.open(input_path, 'r')
     filename = os.path.basename(input_path)
     filename = os.path.join(dest_dir, os.path.splitext(filename)[0] + ".BMP")
     target_path = fnutils._make_target_filepath(input_path)
     if os.path.isfile(target_path):
-        with open(target_path, "rb") as f:
-            target = f.read()
-        target_filename = fnutils._make_target_filepath(filename)
-        with open(target_filename, "wb") as f:
-            f.write(target)
-    im.save(filename, "BMP")
+        # Move target close to the input for it to be picked up in the
+        # transcoding process
+        with open(target_path, "rb") as f_in, \
+                open(fnutils._make_target_filepath(filename), "wb") as f_out:
+            f_out.write(f_in.read())
+    im.convert("RGB").save(filename, "BMP")
     return filename
 
 
-@TaskGenerator
-def transcode_img(input_path, dest_dir, clean_basename, mp4, ssh_remote=None,
-                  tmp=None):
+def transcode_img(input_path, dest_dir, clean_basename, mp4, crf=10,
+                  ssh_remote=None, tmp=None):
     upload_dir, queue_dir = _get_dir_hierarchy(dest_dir)
     tmp_dir = tmp if tmp is not None else \
               os.path.dirname(input_path)
@@ -193,11 +194,11 @@ def transcode_img(input_path, dest_dir, clean_basename, mp4, ssh_remote=None,
     output_path = fnutils._make_transcoded_filepath(os.path.join(tmp_dir, filename))
     command = ["python", "-m", "pybenzinaconcat.image2mp4"] \
               if mp4 else ["image2heif"]
-    cmd_arguments = " --codec=h265 --tile=512:512:yuv420 --crf=10 " \
+    cmd_arguments = " --codec=h265 --tile=512:512:yuv420 --crf={crf} " \
                     "--output={dest} " \
                     "--primary --thumb --name={name} " \
                     "--item=path={src}" \
-                    .format(name=clean_basename,
+                    .format(name=clean_basename, crf=crf,
                             src=input_path, dest=output_path)
     if os.path.exists(target_path):
         cmd_arguments += " --hidden --name=target " \
@@ -244,24 +245,7 @@ def transcode_img(input_path, dest_dir, clean_basename, mp4, ssh_remote=None,
 
 
 def try_transcode_task(task, input_path):
-    # Unlock to retry the task
-    if task.is_failed():
-        task.unlock()
-
-    # No other thread should own the lock
-    if not task.lock():
-        raise RuntimeError("Could not obtain transcoding task lock for image "
-                           "[{}]. Task's hash is [{}]"
-                           .format(input_path, task.hash()))
-
     try:
-        # If task has already executed, then the file has already been
-        # transcoded and queued
-        if task.can_load():
-            LOGGER.warning("Ignoring [{}] since it has already been transcoded"
-                           .format(input_path))
-            return not task.is_failed()
-
         task.run()
         if task.result is None:
             task.fail()
@@ -279,42 +263,47 @@ def try_transcode_task(task, input_path):
 
 
 @TaskGenerator
-def transcode_batch(src, dest, exclude_files=tuple(), mp4=True,
-                    ssh_remote=None, tmp=None):
+def transcode_batch(src, dest, exclude_files=tuple(), mp4=True, crf=10,
+                    force_bmp=False, ssh_remote=None, tmp=None):
     exclude_files = set(exclude_files)
 
     transcoded_imgs = []
     failed_imgs = []
+
+    # Transcode files sequentially
     for input_path in src:
-        clean_basename = fnutils._get_clean_filepath(input_path, basename=True)
+        clean_basename = fnutils.get_clean_filepath(input_path, basename=True)
         if clean_basename in exclude_files:
             LOGGER.info("Ignoring [{}] since [{}] is excluded"
                         .format(input_path, clean_basename))
             continue
 
-        # Transcode files sequentially and only once
-        task = transcode_img(input_path, dest, clean_basename, mp4,
-                             ssh_remote=ssh_remote, tmp=tmp)
-
+        transcoded_path = None
         for i in range(2):
-            if try_transcode_task(task, input_path):
-                break
+            # Skip to bmp extra step
+            if force_bmp:
+                continue
+
+            transcoded_path = transcode_img(input_path, dest, clean_basename,
+                                            mp4, crf, ssh_remote=ssh_remote,
+                                            tmp=tmp)
+            break
         else:
             try:
                 # Transcode to BMP prior to H.265 to work around ffmpeg errors
                 bmp_path = to_bmp(input_path, tmp)
                 LOGGER.warning("Extra transcode step on [{}]: BMP written at "
                                "[{}]".format(input_path, bmp_path))
-                task = transcode_img(bmp_path, dest, clean_basename, mp4,
-                                     ssh_remote=ssh_remote, tmp=tmp)
-                try_transcode_task(task, input_path)
+                transcoded_path = transcode_img(bmp_path, dest, clean_basename,
+                                                mp4, crf, ssh_remote=ssh_remote,
+                                                tmp=tmp)
             except FileNotFoundError:
                 pass
 
-        if task.is_failed():
+        if transcoded_path is None:
             failed_imgs.append(input_path)
         else:
-            transcoded_imgs.append(jug.value(task))
+            transcoded_imgs.append(transcoded_path)
 
     if failed_imgs:
         raise RuntimeError("Could not transcode all images [{}]"
@@ -323,7 +312,8 @@ def transcode_batch(src, dest, exclude_files=tuple(), mp4=True,
     return transcoded_imgs
 
 
-def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
+def transcode(src, dest, excludes=None, mp4=False, crf=10, force_bmp=False,
+              ssh_remote=None, tmp=None):
     """ Take a list of images and transcode them into a destination directory
 
     The suffix ".transcoded" will be appended to the file's base name
@@ -346,19 +336,19 @@ def transcode(src, dest, excludes=None, mp4=True, ssh_remote=None, tmp=None):
             exclude_files = f.read().split('\n')
 
         for i, exclude in enumerate(exclude_files):
-            exclude_files[i] = fnutils._get_clean_filepath(exclude,
-                                                           basename=True)
+            exclude_files[i] = fnutils.get_clean_filepath(exclude,
+                                                          basename=True)
         exclude_files.sort()
     else:
         exclude_files = []
 
     source = jug.utils.identity(source)
     exclude_files = jug.utils.identity(exclude_files)
-    return transcode_batch(source, dest, exclude_files, mp4, ssh_remote, tmp)
+    return transcode_batch(source, dest, exclude_files, mp4, crf, force_bmp, ssh_remote, tmp)
 
 
-def extract(src, dest, dataset_id, dataset_format, start=0, size=0,
-            batch_size=0):
+def extract(src, dest, dataset_id, dataset_format, indices=0, size=None,
+            batch_size=1024):
     """ Take a source archive file and extract images from it into a
     destination directory.
     """
@@ -370,16 +360,22 @@ def extract(src, dest, dataset_id, dataset_format, start=0, size=0,
     dataset_cls = datasets.get_cls(dataset_id)
     dataset = dataset_cls(src, dataset_format)
 
-    if size == 0:
-        size = dataset.size
+    if size is None:
+        size = len(dataset)
+
+    if isinstance(indices, Iterable) and len(indices) == 1:
+        indices = indices[0]
+    elif isinstance(indices, Iterable):
+        batch_size = None
+        size = None
 
     if size and batch_size:
         batch_size = min(size, batch_size)
         processes_kwargs = []
-        for start in range(start, start + size, batch_size):
+        for indices in range(indices, indices + size, batch_size):
             process_kwargs = copy.deepcopy(kwargs)
             del process_kwargs["batch_size"]
-            process_kwargs["start"] = start
+            process_kwargs["indices"] = indices
             process_kwargs["size"] = batch_size
             processes_kwargs.append(process_kwargs)
     else:
@@ -395,44 +391,12 @@ def extract(src, dest, dataset_id, dataset_format, start=0, size=0,
     return [dataset_cls.extract(dataset, **kwargs) for kwargs in processes_kwargs]
 
 
-FileDesc = namedtuple("FileDesc", ["name", "mode"])
-
-
-class ChainAction(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string=None):
-        action = option_string.lstrip('-')
-        setattr(namespace, self.dest, [action] + values)
-
-
-class DatasetAction(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string=None):
-        dataset_id, ar_format = values.split(':')
-        dest = self.dest.lstrip('_')
-        setattr(namespace, dest + "_id", dataset_id)
-        setattr(namespace, dest + "_format", ar_format)
-        delattr(namespace, self.dest) 
-
-
-class CheckFileType(argparse.FileType):
-    def __call__(self, string):
-        f = super(CheckFileType, self).__call__(string)
-        f.close()
-        return FileDesc(f.name, f.mode)
-
-
-def _map_datasets_formats():
-    for label in datasets.ids:
-        for ar_format in datasets.get_cls(label).supported_formats():
-            yield "{}:{}".format(label, ar_format)
-
-
 def build_base_parser():
     parser = argparse.ArgumentParser(description="Benzina HEIF Concatenation",
+                                     add_help=False,
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("_action", metavar="action",
                         choices=list(ACTIONS.keys()), help="action to execute")
-    parser.add_argument('args', nargs=argparse.REMAINDER,
-                        help="action's arguments")
 
     return parser
 
@@ -463,18 +427,24 @@ def build_transcode_parser():
                              "of files to transcode")
     parser.add_argument("dest", metavar="destination",
                         help="directory to write the transcoded file(s)")
-    parser.add_argument("--excludes", default=None, type=CheckFileType('r'),
+    parser.add_argument("--excludes", default=None,
+                        type=argsutils.CheckFileType('r'),
                         help="a text file containing the list of files to exclude")
     parser.add_argument("--mp4", default=False, action="store_true",
                         help="use image2mp4 instead of image2heif")
+    parser.add_argument("--crf", default="10", type=int,
+                        help="constant rate factor to use for the transcoded image")
+    parser.add_argument("--force-bmp", default=False, action="store_true",
+                        help="force transcoding to bmp prior transcoding to h265")
     parser.add_argument("--ssh-remote", metavar="REMOTE",
                         help="optional remote to use to transfer the transcoded "
                              "file to destination")
     parser.add_argument("--tmp", metavar="DIR",
                         help="the directory to use to store temporary file(s)")
 
-    parser.add_argument("--concat", metavar="...", action=ChainAction,
-                        dest="_chain", nargs=argparse.REMAINDER,
+    parser.add_argument("--concat", metavar="...",
+                        action=argsutils.ChainAction, dest="_chain",
+                        nargs=argparse.REMAINDER,
                         help="chain the concat action. concat will be fed by "
                              "transcode's dest through its src.")
 
@@ -491,18 +461,22 @@ def build_extract_parser():
                         help="archive file to extract the images from")
     parser.add_argument("dest", metavar="destination",
                         help="directory to write the extracted file(s)")
-    parser.add_argument("_dataset", choices=list(_map_datasets_formats()),
-                        action=DatasetAction, help="dataset id and format")
-    parser.add_argument("--start", metavar="IDX", default=0, type=int,
-                        help="the start element index to transcode from "
-                             "source")
-    parser.add_argument("--size", default=0, metavar="NUM", type=int,
+    parser.add_argument("_dataset",
+                        choices=list(datasets.iter_datasets_formats()),
+                        action=argsutils.DatasetAction,
+                        help="dataset id and format")
+    parser.add_argument("--indices", metavar="IDX", default=0,
+                        action=argsutils.IntOrList,
+                        help="the start element index or comma-separated "
+                             "indices to extract from source")
+    parser.add_argument("--size", default=None, metavar="NUM", type=int,
                         help="the number of elements to extract from source")
-    parser.add_argument("--batch-size", default=512, metavar="NUM", type=int,
-                        help="the batch size for a single job.")
+    parser.add_argument("--batch-size", default=1024, metavar="NUM", type=int,
+                        help="the batch size for a single job")
 
-    parser.add_argument("--transcode", metavar="...", action=ChainAction,
-                        dest="_chain", nargs=argparse.REMAINDER,
+    parser.add_argument("--transcode", metavar="...",
+                        action=argsutils.ChainAction, dest="_chain",
+                        nargs=argparse.REMAINDER,
                         help="chain the transcode action. transcode will be "
                              "fed by extract's dest through its src.")
 
@@ -510,29 +484,7 @@ def build_extract_parser():
 
 
 def parse_args(argv=None):
-    argv = sys.argv[1:] if argv is None else argv
-    is_help_request = "-h" in argv
-
-    if is_help_request:
-        if len(argv) == 1:
-            build_base_parser().parse_args(argv)
-        argv.remove("-h")
-        base_args = build_base_parser().parse_args(argv)
-        ACTIONS_PARSER.get(base_args._action, None).parse_args(argv + ["-h"])
-
-    base_args = build_base_parser().parse_args(argv)
-    args = ACTIONS_PARSER.get(base_args._action, None) \
-        .parse_args([base_args._action] + base_args.args)
-    try:
-        argv = args._chain or tuple()
-        del args._chain
-    except AttributeError:
-        argv = tuple()
-    return args, argv
-
-
-def _run_action(_action=None, **kwargs):
-    return ACTIONS.get(_action, None)(**kwargs)
+    return argsutils.parse_args(ACTIONS_PARSER, argv)
 
 
 def main(args=None, argv=None):
@@ -544,7 +496,7 @@ def main(args=None, argv=None):
         except TypeError:
             pass
 
-    result_arr = _run_action(**vars(args))
+    result_arr = argsutils.run_action(ACTIONS, **vars(args))
 
     if isinstance(result_arr, jug.Task):
         result_arr = [result_arr]
@@ -560,7 +512,7 @@ def main(args=None, argv=None):
             args = [{**vars(args), "src": result_arr}]
         else:
             args = [vars(args)]
-        result_arr = [_run_action(**_args) for _args in args]
+        result_arr = [argsutils.run_action(ACTIONS, **_args) for _args in args]
     
     return result_arr
 
@@ -569,4 +521,4 @@ ACTIONS = {"concat": concat, "extract": extract, "transcode": transcode}
 ACTIONS_PARSER = {"concat": build_concat_parser(),
                   "extract": build_extract_parser(),
                   "transcode": build_transcode_parser(),
-                  "_": build_base_parser()}
+                  "_base": build_base_parser()}

@@ -15,7 +15,7 @@ setup(
                       "numpy",
                       "pybenzinaparse @ git+https://github.com/satyaog/pybenzinaparse.git@0.2.2#egg=pybenzinaparse-0.2.2"],
     extras_require={"h5py": ["h5py"]},
-    tests_require=["h5py", "nose", "pytest"],
+    tests_require=["jug >= 2.1.1", "h5py", "pytest"],
     long_description="",
     data_files=[("tests", glob.glob("test_datasets/*", recursive=True))]
 )

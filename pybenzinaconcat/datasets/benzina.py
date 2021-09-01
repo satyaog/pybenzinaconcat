@@ -1,7 +1,6 @@
 import os
 
 from bitstring import ConstBitStream
-from jug import TaskGenerator
 import numpy as np
 
 from pybenzinaparse import Parser
@@ -76,12 +75,11 @@ class Benzina(Dataset):
         self._fname_co = co
         self._fname_sz = sz
 
-        self._size = max(self._input_co.entry_count,
-                         self._input_sz.sample_count)
+        self._len = max(self._input_co.entry_count,
+                        self._input_sz.sample_count)
 
-    @property
-    def size(self):
-        return self._size
+    def __len__(self):
+        return self._len
 
     def get_input_locations(self, f):
         co, _ = _get_chunk_offset(f, self._input_co)
@@ -94,27 +92,23 @@ class Benzina(Dataset):
         return np.broadcast_arrays(co, sz)
 
     @staticmethod
-    @TaskGenerator
-    def extract(dataset, dest, start=0, size=512):
-        extract(dataset, dest, start, size)
+    def extract_batch(dataset, dest, indices):
+        extract(dataset, dest, indices)
 
 
-def extract(dataset, dest, start, size):
+def extract(dataset, dest, indices):
     """ Take a source mp4/bzna file and extract samples from it into a
     destination directory
     """
     extract_dir = dest
 
     extracted_filenames = []
-    
-    with open(dataset.src, "rb") as ds_f:
-        start = start
-        end = min(start + size, dataset.size) if size else dataset.size
 
+    with open(dataset.src, "rb") as ds_f:
         input_co, input_sz = dataset.get_input_locations(ds_f)
         fname_co, fname_sz = dataset.get_fname_locations(ds_f)
 
-        for i in range(start, end):
+        for i in indices:
             fname_offset, fname_size = fname_co[i], fname_sz[i]
             ds_f.seek(fname_offset)
             filename = ds_f.read(fname_size).rstrip(b'\0').decode("utf-8")
