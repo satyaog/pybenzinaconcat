@@ -11,7 +11,9 @@ from pybenzinaconcat.image2mp4 import image2mp4
 from pybenzinaconcat.image2mp4.image2mp4 import clap_traks, _clean_boxes, \
     make_filenames_trak, make_targets_trak, parse_args, reset_traks_id
 
-DATA_DIR = os.path.abspath("test_datasets")
+TESTS_WORKING_DIR = os.path.dirname(__file__)
+DATA_DIR = os.path.join(TESTS_WORKING_DIR, "test_datasets")
+DATA_DIR = os.path.abspath(DATA_DIR)
 
 PWD = "tests_tmp"
 
