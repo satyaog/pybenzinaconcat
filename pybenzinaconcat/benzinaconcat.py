@@ -283,11 +283,14 @@ def transcode_batch(src, dest, exclude_files=tuple(), mp4=True, crf=10,
             # Skip to bmp extra step
             if force_bmp:
                 continue
-
-            transcoded_path = transcode_img(input_path, dest, clean_basename,
-                                            mp4, crf, ssh_remote=ssh_remote,
-                                            tmp=tmp)
-            break
+            try:
+                transcoded_path = transcode_img(
+                    input_path, dest, clean_basename, mp4, crf,
+                    ssh_remote=ssh_remote, tmp=tmp)
+            except FileNotFoundError:
+                continue
+            else:
+                break
         else:
             try:
                 # Transcode to BMP prior to H.265 to work around ffmpeg errors
