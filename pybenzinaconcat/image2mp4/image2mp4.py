@@ -240,11 +240,12 @@ def i2m_frame_scale_and_pad(src, dest, src_width, src_height, codec, crf,
 
     ffmpeg_filter = ";".join(ffmpeg_filter)
 
-    subprocess.run(["ffmpeg", "-y", "-framerate", "1", "-i", src,
+    subprocess.run(["ffmpeg", "-report", "-y", "-framerate", "1", "-i", src,
                     "-filter_complex", ffmpeg_filter] +
                    mapping + codec_settings + ["-f", "mp4", "-an", dest],
                    check=True,
-                   stdin=subprocess.DEVNULL)
+                   stdin=subprocess.DEVNULL,
+                   env={"FFREPORT":"file=/dev/null", **os.environ})
 
     bstr = ConstBitStream(filename=dest)
     boxes = [box for box in Parser.parse(bstr)]
