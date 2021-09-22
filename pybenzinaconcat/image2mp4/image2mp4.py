@@ -240,8 +240,8 @@ def i2m_frame_scale_and_pad(src, dest, src_width, src_height, codec, crf,
 
     ffmpeg_filter = ";".join(ffmpeg_filter)
 
-    subprocess.run(["ffmpeg", "-report", "-y", "-framerate", "1", "-i", src,
-                    "-dn", "-an", "-sn", "-filter_complex", ffmpeg_filter] +
+    subprocess.run(["ffmpeg", "-y", "-framerate", "1", "-i", src, "-dn", "-an",
+                    "-sn", "-filter_complex", ffmpeg_filter] +
                    mapping + codec_settings +
                    ["-f", "mp4", dest],
                    check=True,
