@@ -222,7 +222,8 @@ def transcode_img(input_path, dest_dir, clean_basename, mp4, crf=10,
     try:
         subprocess.run(["rsync", "-v", "--remove-source-files", output_path,
                         fnutils._get_remote_path(ssh_remote, upload_dir)],
-                       check=True)
+                       check=True,
+                       stdout=subprocess.DEVNULL)
     except subprocess.CalledProcessError:
         LOGGER.error("Could not move file [{}] to upload dir [{}]"
                      .format(output_path, upload_dir))
